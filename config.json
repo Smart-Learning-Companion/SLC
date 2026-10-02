@@ -1,0 +1,9 @@
+{
+  "decision": {
+    "confirmWindowSeconds": 8,
+    "cooldownSeconds": 120
+  },
+  "perception": {
+    "featuresPerSecond": 5
+  }
+}
