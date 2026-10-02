@@ -1,0 +1,8 @@
+opencv-python
+mediapipe
+onnxruntime
+numpy
+fastapi
+uvicorn
+rapidocr-onnxruntime
+easyocr  # benchmark only; remove if not chosen
