@@ -1,0 +1,17 @@
+# secrets and data: never commit
+.env
+research/data/
+*.db
+*.sqlite
+
+# build and tooling
+.venv/
+__pycache__/
+node_modules/
+dist/
+out/
+bin/
+obj/
+.vs/
+.idea/
+*.user
