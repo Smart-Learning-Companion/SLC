@@ -1,0 +1,3 @@
+# Week 3 OCR benchmark only. Pulls in PyTorch, so install on demand:
+#   pip install -r requirements-bench.txt
+easyocr
