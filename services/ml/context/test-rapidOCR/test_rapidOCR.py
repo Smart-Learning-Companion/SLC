@@ -2,7 +2,7 @@ from rapidocr_onnxruntime import RapidOCR
 
 ocr = RapidOCR()
 
-image_path = "test-rapidOCR\\img.png"
+image_path = "img.png"
 
 result, elapsed = ocr(image_path)
 
