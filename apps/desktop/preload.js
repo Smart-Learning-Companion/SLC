@@ -16,4 +16,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   restoreMainWindow: () => ipcRenderer.send('restore-main-window'),
   minimizeToWidget: () => ipcRenderer.send('minimize-to-widget'),
+  sendFrameContext: (frameBuffer, requestId) =>
+    ipcRenderer.invoke('send-frame-context', { frameBuffer, requestId }),
 });

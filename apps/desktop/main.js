@@ -22,6 +22,24 @@ let backendProcess = null;
 // 🔒 PRIVACY BY DESIGN: Security Token Setup
 // ==========================================
 const sessionToken = crypto.randomBytes(32).toString('hex');
+const backendPort = process.env.SLC_PORT || '5050';
+const mlPort = process.env.SLC_ML_PORT || '5051';
+
+async function notifyBackendSession(action) {
+  const endpoint = action === 'start' || action === 'resume' ? '/session/start' : action === 'pause' ? '/session/pause' : '/session/stop';
+  try {
+    await fetch(`http://127.0.0.1:${backendPort}${endpoint}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${sessionToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+  } catch {
+    // Backend may still be initializing or running standalone in dev
+  }
+}
 
 function startBackendService() {
   if (process.env.SLC_DEV === '1') {
@@ -32,10 +50,14 @@ function startBackendService() {
   const mockBackendPath = path.join(__dirname, 'mock-backend.js');
   console.log('[Electron Main] Spawning background orchestrator service...');
 
+  // Compliant with docs/contracts/launch-and-token.md
   backendProcess = spawn(process.execPath, [mockBackendPath], {
     env: {
       ...process.env,
       SLC_TOKEN: sessionToken,
+      SLC_PORT: String(backendPort),
+      SLC_ML_PORT: String(mlPort),
+      SLC_DATA_DIR: app.getPath('userData'),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -162,6 +184,8 @@ ipcMain.on('session-state-changed', (_event, state) => {
     return;
   }
   currentSessionState = state;
+  const action = state === 'monitoring' ? 'start' : state === 'paused' ? 'pause' : 'stop';
+  notifyBackendSession(action);
   if (floatingWidget && !floatingWidget.isDestroyed()) {
     floatingWidget.webContents.send('sync-session-state', state);
   }
@@ -178,11 +202,32 @@ ipcMain.on('trigger-session-action', (_event, action) => {
   if (action === 'resume') currentSessionState = 'monitoring';
   if (action === 'stop') currentSessionState = 'idle';
 
+  notifyBackendSession(action);
+
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('session-action', action);
   }
   if (floatingWidget && !floatingWidget.isDestroyed()) {
     floatingWidget.webContents.send('sync-session-state', currentSessionState);
+  }
+});
+
+// Contract context.md: POST raw JPEG bytes to /context/frame
+ipcMain.handle('send-frame-context', async (_event, { frameBuffer, requestId }) => {
+  try {
+    const res = await fetch(`http://127.0.0.1:${backendPort}/context/frame`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${sessionToken}`,
+        'Content-Type': 'image/jpeg',
+        'X-Request-Id': requestId || `req_${Date.now()}`,
+      },
+      body: Buffer.from(frameBuffer),
+    });
+    return { success: res.ok, status: res.status };
+  } catch (err) {
+    console.error('[Electron Main] Failed to dispatch frame context to backend:', err);
+    return { success: false, error: err.message };
   }
 });
 

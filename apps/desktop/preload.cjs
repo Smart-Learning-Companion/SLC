@@ -29,4 +29,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Dashboard → Minimize button: hide main window, show floating widget
   minimizeToWidget: () => ipcRenderer.send('minimize-to-widget'),
+
+  // Context: dispatch captured frame to .NET /context/frame endpoint
+  sendFrameContext: (frameBuffer, requestId) =>
+    ipcRenderer.invoke('send-frame-context', { frameBuffer, requestId }),
 });

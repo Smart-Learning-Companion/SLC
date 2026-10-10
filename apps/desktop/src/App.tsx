@@ -11,6 +11,7 @@ declare global {
       onSessionAction: (callback: (action: string) => void) => () => void;
       restoreMainWindow: () => void;
       minimizeToWidget: () => void;
+      sendFrameContext: (frameBuffer: ArrayBuffer, requestId?: string) => Promise<{ success: boolean; status?: number; error?: string }>;
     };
   }
 }
@@ -22,6 +23,7 @@ interface CaptureResult {
   sizeBytes: number;
   durationMs: number;
   timestamp: string;
+  backendDispatched?: boolean;
 }
 
 type SessionState = 'idle' | 'monitoring' | 'paused';
@@ -209,6 +211,18 @@ function Dashboard() {
 
       const durationMs = Math.round(performance.now() - startTime);
 
+      // Contract context.md: Dispatch JPEG bytes to backend orchestrator via IPC
+      let backendDispatched = false;
+      if (window.electronAPI?.sendFrameContext) {
+        try {
+          const buffer = await blob.arrayBuffer();
+          const dispatchRes = await window.electronAPI.sendFrameContext(buffer, `test_${Date.now()}`);
+          backendDispatched = dispatchRes?.success ?? false;
+        } catch (dispatchErr) {
+          console.warn('[Capture Pipeline] Backend dispatch failed:', dispatchErr);
+        }
+      }
+
       if (lastCapture?.previewUrl) {
         URL.revokeObjectURL(lastCapture.previewUrl);
       }
@@ -220,6 +234,7 @@ function Dashboard() {
         sizeBytes: blob.size,
         durationMs,
         timestamp: new Date().toLocaleTimeString(),
+        backendDispatched,
       });
     } catch (err: unknown) {
       console.error('[Capture Error]', err);
@@ -355,8 +370,12 @@ function Dashboard() {
                   </tr>
                   <tr>
                     <th>Memory Policy</th>
-                    <td colSpan={3}>
-                      In-memory buffer only · Unsaved to disk · Direct IPC payload
+                    <td>In-memory buffer only · Zero disk write</td>
+                    <th>Backend Pipeline</th>
+                    <td>
+                      {lastCapture.backendDispatched
+                        ? '✅ 202 Accepted (POST /context/frame)'
+                        : 'Local in-memory preview'}
                     </td>
                   </tr>
                 </tbody>
@@ -378,7 +397,7 @@ function Dashboard() {
       </main>
 
       <footer className="footer">
-        <span>Local Endpoint: 127.0.0.1</span>
+        <span>Local Endpoint: 127.0.0.1:5050</span>
         <span>Process Model: Electron → .NET → Python</span>
       </footer>
     </div>
