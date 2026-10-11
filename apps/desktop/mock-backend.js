@@ -18,6 +18,7 @@ const token = process.env.SLC_TOKEN;
 const port = parseInt(process.env.SLC_PORT || '5050', 10);
 const mlPort = parseInt(process.env.SLC_ML_PORT || '5051', 10);
 const dataDir = process.env.SLC_DATA_DIR || './data';
+const dbKey = process.env.SLC_DB_KEY;
 
 if (!token || token.length < 32) {
   console.error('[Mock-Backend] [SECURITY ERROR] Missing or invalid SLC_TOKEN! Refusing to start.');
@@ -28,6 +29,12 @@ if (!token || token.length < 32) {
 console.log(`[Mock-Backend] Initializing service on 127.0.0.1:${port}...`);
 console.log(`[Mock-Backend] Environment verified: ML Port=${mlPort}, DataDir=${dataDir}`);
 console.log(`[Mock-Backend] Security token verified (active in-memory authentication).`);
+
+if (dbKey && dbKey.length >= 32) {
+  console.log(`[Mock-Backend] SQLCipher DB key verified (active in-memory encryption key).`);
+} else {
+  console.warn(`[Mock-Backend] Warning: SLC_DB_KEY is missing or too short.`);
+}
 
 let activeSessionId = null;
 
