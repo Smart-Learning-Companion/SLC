@@ -1,4 +1,4 @@
-# Contracts (DRAFT, finalised by G1, Oct 7)
+# Contracts v1 (agreed by G1, Oct 11)
 
 All local services bind to 127.0.0.1. Every request carries the session token.
 
