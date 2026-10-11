@@ -1,7 +1,8 @@
-import { app, BrowserWindow, session, desktopCapturer, screen, ipcMain } from 'electron';
+import { app, BrowserWindow, session, desktopCapturer, screen, ipcMain, safeStorage } from 'electron';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import crypto from 'crypto';
+import fs from 'fs';
 import { spawn } from 'child_process';
 
 // Enable Wayland PipeWire capture flags on Linux
@@ -24,6 +25,42 @@ let backendProcess = null;
 const sessionToken = crypto.randomBytes(32).toString('hex');
 const backendPort = process.env.SLC_PORT || '5050';
 const mlPort = process.env.SLC_ML_PORT || '5051';
+
+// ==========================================
+// 🔒 PRIVACY BY DESIGN: SQLCipher DB Key Setup
+// ==========================================
+function getOrCreateDatabaseKey() {
+  const userDataDir = app.getPath('userData');
+  const keyFilePath = path.join(userDataDir, 'slc_db.key');
+
+  try {
+    if (!fs.existsSync(userDataDir)) {
+      fs.mkdirSync(userDataDir, { recursive: true });
+    }
+
+    if (fs.existsSync(keyFilePath)) {
+      const encryptedBuffer = fs.readFileSync(keyFilePath);
+      if (safeStorage.isEncryptionAvailable()) {
+        return safeStorage.decryptString(encryptedBuffer);
+      } else {
+        return encryptedBuffer.toString('utf8');
+      }
+    } else {
+      const newKey = crypto.randomBytes(32).toString('hex');
+      if (safeStorage.isEncryptionAvailable()) {
+        const encryptedBuffer = safeStorage.encryptString(newKey);
+        fs.writeFileSync(keyFilePath, encryptedBuffer);
+      } else {
+        console.warn('[Security] safeStorage encryption unavailable. Storing fallback key.');
+        fs.writeFileSync(keyFilePath, newKey, 'utf8');
+      }
+      return newKey;
+    }
+  } catch (err) {
+    console.error('[Security] Failed to manage encrypted DB key with safeStorage:', err);
+    return crypto.randomBytes(32).toString('hex');
+  }
+}
 
 async function notifyBackendSession(action) {
   const endpoint = action === 'start' || action === 'resume' ? '/session/start' : action === 'pause' ? '/session/pause' : '/session/stop';
@@ -48,6 +85,7 @@ function startBackendService() {
   }
 
   const mockBackendPath = path.join(__dirname, 'mock-backend.js');
+  const dbKey = getOrCreateDatabaseKey();
   console.log('[Electron Main] Spawning background orchestrator service...');
 
   // Compliant with docs/contracts/launch-and-token.md
@@ -58,6 +96,7 @@ function startBackendService() {
       SLC_PORT: String(backendPort),
       SLC_ML_PORT: String(mlPort),
       SLC_DATA_DIR: app.getPath('userData'),
+      SLC_DB_KEY: dbKey,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
