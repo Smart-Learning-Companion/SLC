@@ -15,3 +15,11 @@ obj/
 .vs/
 .idea/
 *.user
+
+# models and debug output
+*.task
+debug_preview.jpg
+
+# models and debug output
+*.task
+debug_preview.jpg
