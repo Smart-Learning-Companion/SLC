@@ -48,3 +48,11 @@ Full plan: see the team plan PDF. Contracts: `docs/contracts/`.
 - Never call `cv2.imshow` in service code. For debugging, write an image to disk.
 - Download models with `python download_models.py` (files are git-ignored).
 - Run scripts with the venv interpreter: `../.venv/bin/python` (Linux), `..\.venv\Scripts\python.exe` (Windows).
+
+## Running the orchestrator (dev)
+
+    cd services/orchestrator
+    SLC_TOKEN=dev dotnet run            # PowerShell: $env:SLC_TOKEN="dev"; dotnet run
+
+Listens on 127.0.0.1:8100. Contracts: `docs/contracts/`. Mocks: `services/ml/mocks/`.
+For the UI: connect SignalR to `http://127.0.0.1:8100/hub` with `accessTokenFactory: () => "dev"`.
