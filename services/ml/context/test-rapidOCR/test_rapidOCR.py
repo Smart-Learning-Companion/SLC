@@ -1,18 +1,22 @@
-from rapidocr_onnxruntime import RapidOCR
 
-ocr = RapidOCR()
+from pathlib import Path
+from ocr_service import ocr_image
 
-image_path = "img.png"
+# Get the directory containing this Python file
+BASE_DIR = Path(__file__).resolve().parent
 
-result, elapsed = ocr(image_path)
+# Manually provided image
+image_path = BASE_DIR / "img.png"
 
-print("\n===== OCR RESULT =====")
+# Check whether the image exists
+if not image_path.exists():
+    raise FileNotFoundError(f"Image not found: {image_path}")
 
-for item in result:
-    box, text, confidence = item
-    print(f"Text: {text}")
-    print(f"Confidence: {float(confidence): .4f}")
-    print(f"Box: {box}")
-    print("-" * 40)
+# Convert image into bytes
+image_bytes = image_path.read_bytes()
 
-print(f"\nProcessing time: {elapsed}")
+# Extract text
+result = ocr_image(image_bytes)
+
+print("===== OCR RESULT =====")
+print(result)
