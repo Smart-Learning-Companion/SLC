@@ -604,4 +604,253 @@
   background-color: #8b949e;
 }
 
+/* ─── 🔔 Soft-Alert Banner ─────────────────────────────────────────────────── */
+.soft-alert-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  background: linear-gradient(90deg, rgba(210, 153, 34, 0.15) 0%, rgba(22, 27, 34, 0.95) 100%);
+  border: 1px solid #d29922;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(210, 153, 34, 0.12);
+  animation: slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.soft-alert-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.soft-alert-icon-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background-color: rgba(210, 153, 34, 0.2);
+  color: #e3b341;
+  flex-shrink: 0;
+  animation: pulseAmber 2s infinite ease-in-out;
+}
+
+@keyframes pulseAmber {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(210, 153, 34, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(210, 153, 34, 0);
+  }
+}
+
+.soft-alert-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f0f6fc;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.soft-alert-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background-color: rgba(210, 153, 34, 0.25);
+  color: #f0b72f;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.soft-alert-desc {
+  font-size: 12px;
+  color: #8b949e;
+  margin-top: 2px;
+}
+
+.soft-alert-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btn-alert-accept {
+  background-color: #d29922;
+  color: #0e1117;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+
+.btn-alert-accept:hover {
+  background-color: #e3b341;
+  box-shadow: 0 0 10px rgba(210, 153, 34, 0.4);
+}
+
+.btn-alert-dismiss {
+  background-color: transparent;
+  color: #8b949e;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid #30363d;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+
+.btn-alert-dismiss:hover {
+  color: #c9d1d9;
+  border-color: #8b949e;
+  background-color: #21262d;
+}
+
+/* ─── 💡 AI Tutor Explanation Card ────────────────────────────────────────── */
+.explanation-panel {
+  background: linear-gradient(180deg, #161b22 0%, #0d1117 100%);
+  border: 1px solid #388bfd;
+  border-radius: 8px;
+  padding: 18px 20px;
+  box-shadow: 0 4px 20px rgba(56, 139, 253, 0.12);
+  animation: slideDown 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.explanation-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #21262d;
+}
+
+.explanation-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.explanation-icon {
+  color: #58a6ff;
+  display: flex;
+  align-items: center;
+}
+
+.explanation-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f0f6fc;
+}
+
+.explanation-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lang-toggle {
+  display: flex;
+  background-color: #21262d;
+  border-radius: 6px;
+  border: 1px solid #30363d;
+  padding: 2px;
+}
+
+.lang-btn {
+  background: none;
+  border: none;
+  color: #8b949e;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.lang-btn.active {
+  background-color: #388bfd;
+  color: #ffffff;
+}
+
+.explanation-body {
+  background-color: #0e1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 14px 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #e6edf3;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.explanation-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  font-size: 11px;
+  color: #8b949e;
+}
+
+.explanation-req-badge {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* Quick Help Button */
+.btn-help {
+  background: linear-gradient(135deg, #1f6feb 0%, #8957e5 100%);
+  color: #ffffff;
+  border: none;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(137, 87, 229, 0.25);
+}
+
+.btn-help:hover {
+  opacity: 0.92;
+  box-shadow: 0 4px 12px rgba(137, 87, 229, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-help:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+
 

@@ -15,8 +15,8 @@
 import http from 'http';
 
 const token = process.env.SLC_TOKEN;
-const port = parseInt(process.env.SLC_PORT || '5050', 10);
-const mlPort = parseInt(process.env.SLC_ML_PORT || '5051', 10);
+const port = parseInt(process.env.SLC_PORT || '8100', 10);
+const mlPort = parseInt(process.env.SLC_ML_PORT || '8200', 10);
 const dataDir = process.env.SLC_DATA_DIR || './data';
 const dbKey = process.env.SLC_DB_KEY;
 
@@ -123,7 +123,14 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // 8. Contract: GET /analytics/timeline & /summary
+  // 8. Contract session-and-help.md: POST /alerts/{id}/response
+  if (req.method === 'POST' && url.pathname.startsWith('/alerts/') && url.pathname.endsWith('/response')) {
+    const alertId = url.pathname.split('/')[2];
+    console.log(`[Mock-Backend] Alert response received for: ${alertId}`);
+    return sendEmpty(204);
+  }
+
+  // 9. Contract: GET /analytics/timeline & /summary
   if (req.method === 'GET' && url.pathname === '/analytics/timeline') {
     return sendJson(200, [{ t: Math.floor(Date.now() / 1000), state: 'focused' }]);
   }
