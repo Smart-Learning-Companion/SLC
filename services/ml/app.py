@@ -1,7 +1,9 @@
 """ML service: perception control + OCR. Run from services/ml: python app.py"""
 
 import os
+import threading
 import time
+import urllib.request
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -75,5 +77,24 @@ async def context_ocr(request: Request):
     }
 
 
+def watch_orchestrator():
+    """Exit if the orchestrator stops answering, so an orphaned service never keeps the camera on."""
+    failures = 0
+    while True:
+        time.sleep(5)
+        try:
+            urllib.request.urlopen(
+                f"http://127.0.0.1:{ORCH_PORT}/health", timeout=2
+            ).close()
+            failures = 0
+        except Exception:
+            failures += 1
+            if failures >= 3:  # about 15 s of silence
+                worker.stop()
+                os._exit(0)
+
+
 if __name__ == "__main__":
+    if os.environ.get("SLC_WATCHDOG") == "1":
+        threading.Thread(target=watch_orchestrator, daemon=True).start()
     uvicorn.run(app, host="127.0.0.1", port=ML_PORT)
