@@ -2,10 +2,10 @@
 
 import os
 import time
+from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-
 from perception.worker import PerceptionWorker
 
 TOKEN = os.environ.get("SLC_TOKEN", "dev")
@@ -21,7 +21,15 @@ except ImportError:
 
 
 worker = PerceptionWorker(f"http://127.0.0.1:{ORCH_PORT}/ingest/features", TOKEN)
-app = FastAPI()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    yield
+    worker.stop()  # always release the camera on shutdown
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -65,11 +73,6 @@ async def context_ocr(request: Request):
         "confidence": 0.0,
         "durationMs": round((time.perf_counter() - t0) * 1000),
     }
-
-
-@app.on_event("shutdown")
-def shutdown():
-    worker.stop()
 
 
 if __name__ == "__main__":
