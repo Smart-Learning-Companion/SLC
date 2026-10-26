@@ -1,8 +1,12 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.SignalR;
+using Slc.Orchestrator;
 
-var token = Environment.GetEnvironmentVariable("SLC_TOKEN") ?? "dev";
+// SLC_DEV=1 means "services are started by hand": allow the dev token and do not launch Python.
+var dev = Environment.GetEnvironmentVariable("SLC_DEV") == "1";
+var token = Environment.GetEnvironmentVariable("SLC_TOKEN")
+    ?? (dev ? "dev" : throw new InvalidOperationException("SLC_TOKEN is not set (SLC_DEV=1 allows the dev token)."));
 var port = Environment.GetEnvironmentVariable("SLC_PORT") ?? "8100";
 var mlPort = Environment.GetEnvironmentVariable("SLC_ML_PORT") ?? "8200";
 
@@ -10,6 +14,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls($"http://127.0.0.1:{port}");
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<SessionState>();
+builder.Services.AddSingleton(new SlcSettings(token, port, mlPort, dev));
 // Localhost only + bearer token, so any origin is acceptable (Electron serves the UI from file:// or Vite).
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddHttpClient("ml", c =>
@@ -18,6 +23,7 @@ builder.Services.AddHttpClient("ml", c =>
     c.Timeout = TimeSpan.FromSeconds(15);
     c.DefaultRequestHeaders.Authorization = new("Bearer", token);
 });
+builder.Services.AddHostedService<MlProcessHost>();
 
 var app = builder.Build();
 app.UseCors();
@@ -109,6 +115,7 @@ app.Run();
 
 record FeaturePacket(double T, bool FaceFound, Dictionary<string, double>? Fer, double? Ear, double? BlinkRate,
     double? BrowFurrow, double? MouthOpen, double? HeadPitch, double? HeadYaw, Dictionary<string, double>? States);
+record SlcSettings(string Token, string Port, string MlPort, bool Dev);
 record AlertResponse(bool Accepted);
 record OcrResult(string Text, double Confidence, double DurationMs);
 class SlcHub : Hub { }
