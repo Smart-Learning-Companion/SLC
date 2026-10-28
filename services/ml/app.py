@@ -1,11 +1,13 @@
 """ML service: perception control + OCR. Run from services/ml: python app.py"""
 
 import os
+import threading
 import time
+import urllib.request
+from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-
 from perception.worker import PerceptionWorker
 
 TOKEN = os.environ.get("SLC_TOKEN", "dev")
@@ -21,7 +23,15 @@ except ImportError:
 
 
 worker = PerceptionWorker(f"http://127.0.0.1:{ORCH_PORT}/ingest/features", TOKEN)
-app = FastAPI()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    yield
+    worker.stop()  # always release the camera on shutdown
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -67,10 +77,24 @@ async def context_ocr(request: Request):
     }
 
 
-@app.on_event("shutdown")
-def shutdown():
-    worker.stop()
+def watch_orchestrator():
+    """Exit if the orchestrator stops answering, so an orphaned service never keeps the camera on."""
+    failures = 0
+    while True:
+        time.sleep(5)
+        try:
+            urllib.request.urlopen(
+                f"http://127.0.0.1:{ORCH_PORT}/health", timeout=2
+            ).close()
+            failures = 0
+        except Exception:
+            failures += 1
+            if failures >= 3:  # about 15 s of silence
+                worker.stop()
+                os._exit(0)
 
 
 if __name__ == "__main__":
+    if os.environ.get("SLC_WATCHDOG") == "1":
+        threading.Thread(target=watch_orchestrator, daemon=True).start()
     uvicorn.run(app, host="127.0.0.1", port=ML_PORT)
