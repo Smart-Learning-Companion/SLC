@@ -1,14 +1,19 @@
+#:property PublishAot=false
+#:property JsonSerializerIsReflectionEnabledByDefault=true
 #:package Microsoft.AspNetCore.SignalR.Client@10.0.14
+#:package Microsoft.Extensions.Logging.Console@10.0.14
 using System.Text.Json;
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.Extensions.Logging;
 
-// Dev tool: prints every SignalR event the orchestrator sends, plus the connection state.
+// Dev tool: prints every SignalR event the orchestrator sends. Client log shows warnings and errors only.
 var port = Environment.GetEnvironmentVariable("SLC_PORT") ?? "8100";
 var token = Environment.GetEnvironmentVariable("SLC_TOKEN") ?? "dev";
 
 var hub = new HubConnectionBuilder()
     .WithUrl($"http://127.0.0.1:{port}/hub", o => o.AccessTokenProvider = () => Task.FromResult<string?>(token))
     .WithAutomaticReconnect(new RetryForever())   // the default gives up after about 40 s
+    .ConfigureLogging(l => { l.SetMinimumLevel(LogLevel.Warning); l.AddConsole(); })
     .Build();
 
 hub.Closed += ex => { Console.WriteLine($"[conn] closed: {ex?.Message}"); return Task.CompletedTask; };
