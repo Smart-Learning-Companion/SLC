@@ -20,12 +20,21 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAn
 builder.Services.AddHttpClient("ml", c =>
 {
     c.BaseAddress = new Uri($"http://127.0.0.1:{mlPort}");
-    c.Timeout = TimeSpan.FromSeconds(15);
+    c.Timeout = TimeSpan.FromSeconds(30);
     c.DefaultRequestHeaders.Authorization = new("Bearer", token);
 });
+builder.Services.AddHttpClient("gemini", c =>
+{
+    c.BaseAddress = new Uri("https://generativelanguage.googleapis.com/");
+    c.Timeout = TimeSpan.FromSeconds(25);   // per attempt; GeminiClient retries once
+});
+builder.Services.AddSingleton<GeminiClient>();
+builder.Services.AddSingleton<ExplainService>();
 builder.Services.AddHostedService<MlProcessHost>();
 
 var app = builder.Build();
+if (string.IsNullOrWhiteSpace(app.Configuration["GEMINI_API_KEY"]) || string.IsNullOrWhiteSpace(app.Configuration["SLC_GEMINI_MODEL"]))
+    app.Logger.LogWarning("GEMINI_API_KEY or SLC_GEMINI_MODEL is not set; explanations will fail.");
 app.UseCors();
 
 // Token check on everything except /health. The SignalR WebSocket passes it as ?access_token=.
@@ -87,20 +96,13 @@ app.MapPost("/help/now", async (IHubContext<SlcHub> hub) =>
     return Results.Accepted();
 });
 
-app.MapPost("/context/frame", async (HttpRequest req, IHttpClientFactory f, IHubContext<SlcHub> hub) =>
+app.MapPost("/context/frame", async (HttpRequest req, ExplainService explain) =>
 {
     using var ms = new MemoryStream();
     await req.Body.CopyToAsync(ms);                       // frame stays in memory, never saved
-    var requestId = req.Headers["X-Request-Id"].ToString();
-    using var content = new ByteArrayContent(ms.ToArray());
-    content.Headers.ContentType = new("image/jpeg");
-    using var resp = await f.CreateClient("ml").PostAsync("/context/ocr", content);
-    if (!resp.IsSuccessStatusCode) return Results.StatusCode(StatusCodes.Status502BadGateway);
-    var ocr = await resp.Content.ReadFromJsonAsync<OcrResult>();
-    // Gemini comes in Week 4. For now echo the OCR text so the UI panel has something to show.
-    await hub.Clients.All.SendAsync("explanation",
-        new { requestId, text = $"[mock] OCR saw: {ocr?.Text}", language = "en" });
-    return Results.Accepted();
+    if (ms.Length == 0) return Results.BadRequest();
+    explain.Enqueue(ms.ToArray(), req.Headers["X-Request-Id"].ToString());
+    return Results.Accepted();                            // the explanation arrives over SignalR
 });
 
 app.MapPost("/alerts/{id}/response", (string id, AlertResponse r) =>
