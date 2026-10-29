@@ -1,0 +1,52 @@
+<!doctype html>
+<meta charset="utf-8"><title>SLC capture spike</title>
+<body style="font-family: sans-serif">
+<button id="grab">Grab frame</button>
+<button id="stop">Stop stream</button>
+<label>Token <input id="token" value="dev"></label>
+<pre id="log"></pre>
+<img id="out" style="max-width: 100%">
+<script>
+let stream = null;
+const log = (m) => (document.getElementById('log').textContent += m + '\n');
+
+document.getElementById('grab').onclick = async () => {
+  try {
+    if (!stream) {                       // one consent at "session start", then reuse the stream
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      log('stream started: ' + stream.getVideoTracks()[0].label);
+    }
+    const video = document.createElement('video');
+    video.srcObject = stream;
+    video.muted = true;
+    await video.play();
+    await new Promise((r) => setTimeout(r, 300));
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    const t0 = performance.now();
+    const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.8));
+    log(`frame ${canvas.width}x${canvas.height}, ${(blob.size / 1024).toFixed(0)} KB, encode ${(performance.now() - t0).toFixed(0)} ms`);
+    document.getElementById('out').src = URL.createObjectURL(blob);
+    const res = await fetch('http://127.0.0.1:8100/context/frame', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + document.getElementById('token').value,
+        'Content-Type': 'image/jpeg',
+        'X-Request-Id': 'spike-' + Date.now(),
+      },
+      body: blob,
+    });
+    log('POST /context/frame -> ' + res.status);
+  } catch (e) {
+    log('error: ' + e);
+  }
+};
+
+document.getElementById('stop').onclick = () => {
+  stream?.getTracks().forEach((t) => t.stop());
+  stream = null;
+  log('stream stopped');
+};
+</script>

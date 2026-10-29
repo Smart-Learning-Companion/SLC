@@ -18,4 +18,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   minimizeToWidget: () => ipcRenderer.send('minimize-to-widget'),
   sendFrameContext: (frameBuffer, requestId) =>
     ipcRenderer.invoke('send-frame-context', { frameBuffer, requestId }),
+  getBackendConfig: () => ipcRenderer.invoke('get-backend-config'),
+  sendAlertResponse: (alertId, accepted) =>
+    ipcRenderer.invoke('send-alert-response', { alertId, accepted }),
+  triggerHelpNow: () => ipcRenderer.invoke('trigger-help-now'),
 });

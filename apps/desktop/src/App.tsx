@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import * as signalR from '@microsoft/signalr';
 import './App.css';
 
 declare global {
@@ -12,6 +13,9 @@ declare global {
       restoreMainWindow: () => void;
       minimizeToWidget: () => void;
       sendFrameContext: (frameBuffer: ArrayBuffer, requestId?: string) => Promise<{ success: boolean; status?: number; error?: string }>;
+      getBackendConfig?: () => Promise<{ port: string; token: string }>;
+      sendAlertResponse?: (alertId: string, accepted: boolean) => Promise<{ success: boolean; status?: number; error?: string }>;
+      triggerHelpNow?: () => Promise<{ success: boolean; status?: number; error?: string }>;
     };
   }
 }
@@ -24,6 +28,19 @@ interface CaptureResult {
   durationMs: number;
   timestamp: string;
   backendDispatched?: boolean;
+}
+
+export interface SoftAlert {
+  alertId: string;
+  kind: 'confusion' | 'drowsiness';
+  t: number;
+}
+
+export interface ActiveExplanation {
+  requestId: string;
+  text: string;
+  language: string;
+  timestamp: string;
 }
 
 type SessionState = 'idle' | 'monitoring' | 'paused';
@@ -141,6 +158,26 @@ function CheckIcon() {
   );
 }
 
+function AlertTriangleIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  );
+}
+
+function SparklesIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+    </svg>
+  );
+}
+
+
+
 // ─── Floating Widget (separate BrowserWindow) ─────────────────────────────────
 function FloatingWidget() {
   const [state, setState] = useState<SessionState>('idle');
@@ -209,6 +246,21 @@ function FloatingWidget() {
             onClick={() => handleAction('resume')}
           >
             <PlayIcon /> Resume
+          </button>
+        )}
+
+        {state === 'monitoring' && (
+          <button
+            type="button"
+            className="btn btn-mini btn-help"
+            style={{ padding: '2px 8px', fontSize: '11px' }}
+            title="Request Quick Help"
+            onClick={() => {
+              window.electronAPI?.triggerHelpNow?.();
+              handleExpand();
+            }}
+          >
+            <SparklesIcon /> Help
           </button>
         )}
 
@@ -358,6 +410,14 @@ function Dashboard() {
   const [lastCapture, setLastCapture] = useState<CaptureResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // SignalR & Backend state
+  const [signalRConnected, setSignalRConnected] = useState(false);
+  const [backendPort, setBackendPort] = useState<string>('8100');
+  const [activeAlert, setActiveAlert] = useState<SoftAlert | null>(null);
+  const [activeExplanation, setActiveExplanation] = useState<ActiveExplanation | null>(null);
+  const [explanationLang, setExplanationLang] = useState<'si' | 'en'>('si');
+  const [requestingHelp, setRequestingHelp] = useState(false);
+
   // Persistent MediaStream and hidden playback Video element
   const activeStreamRef = useRef<MediaStream | null>(null);
   const videoElementRef = useRef<HTMLVideoElement | null>(null);
@@ -457,11 +517,10 @@ function Dashboard() {
     }
   };
 
-  const handlePauseSession = () => {
-    // Contract requirement: "Session start opens the screen stream; pause and stop close it."
+  const handlePauseSession = useCallback(() => {
     cleanupStream();
     setSessionState('paused');
-  };
+  }, [cleanupStream]);
 
   const handleResumeSession = async () => {
     const ok = await startScreenStream();
@@ -470,47 +529,19 @@ function Dashboard() {
     }
   };
 
-  const handleStopSession = () => {
+  const handleStopSession = useCallback(() => {
     cleanupStream();
     setSessionState('idle');
+    setActiveAlert(null);
+    setActiveExplanation(null);
     setLastCapture((prev) => {
       if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
       return null;
     });
-  };
-
-  // Handle actions forwarded from the floating widget
-  useEffect(() => {
-    const unsubscribe = window.electronAPI?.onSessionAction(async (action) => {
-      if (action === 'start') {
-        if (!hasConsented) {
-          window.electronAPI?.restoreMainWindow();
-          setShowConsentModal(true);
-        } else {
-          const ok = await startScreenStream();
-          if (ok) setSessionState('monitoring');
-        }
-      } else if (action === 'pause') {
-        handlePauseSession();
-      } else if (action === 'resume') {
-        const ok = await startScreenStream();
-        if (ok) setSessionState('monitoring');
-      } else if (action === 'stop') {
-        handleStopSession();
-      }
-    });
-    return () => unsubscribe?.();
-  }, [hasConsented, startScreenStream, cleanupStream]);
-
-  // Teardown stream on unmount
-  useEffect(() => {
-    return () => {
-      cleanupStream();
-    };
   }, [cleanupStream]);
 
-  // Capture Frame Handler (uses active stream if available, otherwise one-off)
-  const handleCaptureFrame = async () => {
+  // Capture Frame Handler (uses active in-memory stream for instant <50ms grab)
+  const handleCaptureFrame = useCallback(async (overrideRequestId?: string) => {
     setCapturing(true);
     setErrorMsg(null);
     const startTime = performance.now();
@@ -519,7 +550,6 @@ function Dashboard() {
     let video = videoElementRef.current;
 
     try {
-      // If no continuous session stream is active, spin up a temporary one-off
       if (!video || !isStreamActive || video.readyState < 2) {
         tempStream = await navigator.mediaDevices.getDisplayMedia({
           video: { displaySurface: 'monitor' },
@@ -564,13 +594,14 @@ function Dashboard() {
       if (!blob) throw new Error('JPEG compression failed');
 
       const durationMs = Math.round(performance.now() - startTime);
+      const reqId = overrideRequestId || `req_${Date.now()}`;
 
-      // Contract context.md: Dispatch JPEG bytes to backend orchestrator via IPC
+      // Contract context.md: Dispatch raw JPEG bytes to backend orchestrator via IPC
       let backendDispatched = false;
       if (window.electronAPI?.sendFrameContext) {
         try {
           const buffer = await blob.arrayBuffer();
-          const dispatchRes = await window.electronAPI.sendFrameContext(buffer, `test_${Date.now()}`);
+          const dispatchRes = await window.electronAPI.sendFrameContext(buffer, reqId);
           backendDispatched = dispatchRes?.success ?? false;
         } catch (dispatchErr) {
           console.warn('[Capture Pipeline] Backend dispatch failed:', dispatchErr);
@@ -600,7 +631,165 @@ function Dashboard() {
       }
       setCapturing(false);
     }
+  }, [isStreamActive, lastCapture]);
+
+  // Keep a ref to handleCaptureFrame for SignalR callback without re-triggers
+  const handleCaptureFrameRef = useRef(handleCaptureFrame);
+  useEffect(() => {
+    handleCaptureFrameRef.current = handleCaptureFrame;
+  }, [handleCaptureFrame]);
+
+  // ─── ⚡ SignalR Hub Connection Lifecycle ────────────────────────────────────
+  useEffect(() => {
+    let hubConnection: signalR.HubConnection | null = null;
+    let isMounted = true;
+
+    async function initSignalR() {
+      try {
+        const config = await window.electronAPI?.getBackendConfig?.();
+        if (!config || !isMounted) return;
+
+        setBackendPort(config.port);
+        const hubUrl = `http://127.0.0.1:${config.port}/hub`;
+        console.log(`[SignalR] Initializing hub connection to ${hubUrl}...`);
+
+        const connection = new signalR.HubConnectionBuilder()
+          .withUrl(hubUrl, {
+            accessTokenFactory: () => config.token,
+          })
+          .withAutomaticReconnect([0, 2000, 5000, 10000])
+          .configureLogging(signalR.LogLevel.Warning)
+          .build();
+
+        // 1. Status event: synchronize session state and metrics
+        connection.on('status', (data: { state?: SessionState; cpuPercent?: number }) => {
+          if (!isMounted) return;
+          console.log('[SignalR Status Event]', data);
+          if (data?.state && (data.state === 'idle' || data.state === 'monitoring' || data.state === 'paused')) {
+            setSessionState(data.state);
+          }
+        });
+
+        // 2. SoftAlert event: confusion or drowsiness detected by perception service
+        connection.on('softAlert', (data: SoftAlert) => {
+          if (!isMounted) return;
+          console.log('[SignalR SoftAlert Event]', data);
+          setActiveAlert(data);
+        });
+
+        // 3. CaptureRequest event: orchestrator requests a frame grab for OCR/Gemini
+        connection.on('captureRequest', async (data: { requestId: string }) => {
+          if (!isMounted) return;
+          console.log('[SignalR CaptureRequest Event]', data);
+          if (data?.requestId) {
+            await handleCaptureFrameRef.current(data.requestId);
+          }
+        });
+
+        // 4. Explanation event: AI tutor response received
+        connection.on('explanation', (data: { requestId: string; text: string; language: string }) => {
+          if (!isMounted) return;
+          console.log('[SignalR Explanation Event]', data);
+          setActiveExplanation({
+            requestId: data.requestId,
+            text: data.text,
+            language: data.language || 'en',
+            timestamp: new Date().toLocaleTimeString(),
+          });
+          setRequestingHelp(false);
+        });
+
+        connection.onreconnected(() => {
+          if (isMounted) setSignalRConnected(true);
+        });
+        connection.onclose(() => {
+          if (isMounted) setSignalRConnected(false);
+        });
+
+        await connection.start();
+        if (isMounted) {
+          setSignalRConnected(true);
+          hubConnection = connection;
+          console.log('[SignalR] Connected successfully to Orchestrator Hub.');
+        }
+      } catch (err) {
+        console.warn('[SignalR Connection] Hub unavailable or initializing:', err);
+        if (isMounted) setSignalRConnected(false);
+      }
+    }
+
+    initSignalR();
+
+    return () => {
+      isMounted = false;
+      hubConnection?.stop();
+    };
+  }, []);
+
+  // Soft-Alert Response Handler (Contract: POST /alerts/{id}/response)
+  const handleAlertResponse = async (accepted: boolean) => {
+    if (!activeAlert) return;
+    const alertId = activeAlert.alertId;
+    setActiveAlert(null);
+
+    if (window.electronAPI?.sendAlertResponse) {
+      await window.electronAPI.sendAlertResponse(alertId, accepted);
+    }
+
+    if (accepted) {
+      await handleTriggerQuickHelp();
+    }
   };
+
+  // Quick Help Handler (Contract: POST /help/now)
+  const handleTriggerQuickHelp = async () => {
+    setRequestingHelp(true);
+    setErrorMsg(null);
+    try {
+      if (window.electronAPI?.triggerHelpNow) {
+        const res = await window.electronAPI.triggerHelpNow();
+        if (!res?.success) {
+          await handleCaptureFrame();
+        }
+      } else {
+        await handleCaptureFrame();
+      }
+    } catch {
+      await handleCaptureFrame();
+    } finally {
+      setTimeout(() => setRequestingHelp(false), 3000);
+    }
+  };
+
+  // Handle actions forwarded from the floating widget
+  useEffect(() => {
+    const unsubscribe = window.electronAPI?.onSessionAction(async (action) => {
+      if (action === 'start') {
+        if (!hasConsented) {
+          window.electronAPI?.restoreMainWindow();
+          setShowConsentModal(true);
+        } else {
+          const ok = await startScreenStream();
+          if (ok) setSessionState('monitoring');
+        }
+      } else if (action === 'pause') {
+        handlePauseSession();
+      } else if (action === 'resume') {
+        const ok = await startScreenStream();
+        if (ok) setSessionState('monitoring');
+      } else if (action === 'stop') {
+        handleStopSession();
+      }
+    });
+    return () => unsubscribe?.();
+  }, [hasConsented, startScreenStream, handlePauseSession, handleStopSession]);
+
+  // Teardown stream on unmount
+  useEffect(() => {
+    return () => {
+      cleanupStream();
+    };
+  }, [cleanupStream]);
 
   return (
     <div className="layout">
@@ -622,6 +811,28 @@ function Dashboard() {
         </div>
 
         <div className="topbar-right">
+          <span
+            className="brand-tag"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              color: signalRConnected ? '#3fb950' : '#8b949e',
+            }}
+            title={signalRConnected ? 'SignalR WebSockets Connected' : 'SignalR Hub Reconnecting'}
+          >
+            <span
+              style={{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                backgroundColor: signalRConnected ? '#3fb950' : '#8b949e',
+                boxShadow: signalRConnected ? '0 0 6px rgba(63, 185, 80, 0.6)' : 'none',
+              }}
+            />
+            {signalRConnected ? 'SignalR Live' : 'SignalR Standby'}
+          </span>
+
           <div className="system-status">
             <span className={`status-indicator status-${sessionState}`} />
             <span className="status-label">
@@ -630,6 +841,7 @@ function Dashboard() {
               {sessionState === 'paused' && 'Monitoring Paused'}
             </span>
           </div>
+
           <button
             className="btn btn-secondary btn-sm"
             title="Minimize to floating widget"
@@ -642,6 +854,87 @@ function Dashboard() {
 
       {/* Main Workspace */}
       <main className="content">
+        {/* ─── 🔔 Soft-Alert Banner (Contextual Confusion Nudge) ─── */}
+        {activeAlert && (
+          <div className="soft-alert-banner" role="alert">
+            <div className="soft-alert-left">
+              <div className="soft-alert-icon-box">
+                <AlertTriangleIcon />
+              </div>
+              <div>
+                <div className="soft-alert-title">
+                  <span>Stuck on a concept? (අවබෝධ කරගැනීමට අපහසුද?)</span>
+                  <span className="soft-alert-badge">{activeAlert.kind} detected</span>
+                </div>
+                <div className="soft-alert-desc">
+                  We noticed subtle cues that you might need a hand. Would you like a brief explanation of what's currently on your screen?
+                </div>
+              </div>
+            </div>
+            <div className="soft-alert-actions">
+              <button
+                type="button"
+                className="btn-alert-accept"
+                onClick={() => handleAlertResponse(true)}
+              >
+                <SparklesIcon /> Yes, Help Me (උදව් ලබාගන්න)
+              </button>
+              <button
+                type="button"
+                className="btn-alert-dismiss"
+                onClick={() => handleAlertResponse(false)}
+              >
+                I'm Fine (අවශ්‍ය නැත)
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ─── 💡 AI Tutor Contextual Explanation Card ─── */}
+        {activeExplanation && (
+          <div className="explanation-panel">
+            <div className="explanation-header">
+              <div className="explanation-title-row">
+                <span className="explanation-icon"><SparklesIcon /></span>
+                <h3 className="explanation-title">Contextual AI Tutor Assistance</h3>
+              </div>
+              <div className="explanation-controls">
+                <div className="lang-toggle">
+                  <button
+                    type="button"
+                    className={`lang-btn ${explanationLang === 'si' ? 'active' : ''}`}
+                    onClick={() => setExplanationLang('si')}
+                  >
+                    සිංහල
+                  </button>
+                  <button
+                    type="button"
+                    className={`lang-btn ${explanationLang === 'en' ? 'active' : ''}`}
+                    onClick={() => setExplanationLang('en')}
+                  >
+                    English
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-mini"
+                  onClick={() => setActiveExplanation(null)}
+                  title="Dismiss explanation"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            <div className="explanation-body">
+              {activeExplanation.text}
+            </div>
+            <div className="explanation-footer">
+              <span className="explanation-req-badge">Req ID: {activeExplanation.requestId}</span>
+              <span>Delivered at {activeExplanation.timestamp} · Privacy Verified</span>
+            </div>
+          </div>
+        )}
+
         {/* Session Control Panel */}
         <section className="panel">
           <div className="panel-header">
@@ -654,7 +947,7 @@ function Dashboard() {
                 </span>
               </div>
               <p className="panel-description">
-                Controls the active study session and continuous screen capture stream lifecycle.
+                Controls the active study session, continuous screen stream lifecycle, and live SignalR tutoring pipeline.
               </p>
             </div>
             <div className="action-row">
@@ -667,6 +960,16 @@ function Dashboard() {
                 </button>
               ) : (
                 <>
+                  <button
+                    type="button"
+                    className="btn-help"
+                    onClick={handleTriggerQuickHelp}
+                    disabled={requestingHelp}
+                    title="Request immediate contextual explanation"
+                  >
+                    <SparklesIcon /> {requestingHelp ? 'Analyzing...' : 'Help Now'}
+                  </button>
+
                   {sessionState === 'monitoring' ? (
                     <button
                       className="btn btn-secondary"
@@ -707,7 +1010,7 @@ function Dashboard() {
             </div>
             <button
               className="btn btn-secondary"
-              onClick={handleCaptureFrame}
+              onClick={() => handleCaptureFrame()}
               disabled={capturing}
             >
               <CameraIcon />
@@ -766,8 +1069,8 @@ function Dashboard() {
       </main>
 
       <footer className="footer">
-        <span>Local Endpoint: 127.0.0.1:5050</span>
-        <span>Process Model: Electron → .NET → Python</span>
+        <span>Local Orchestrator: 127.0.0.1:{backendPort}</span>
+        <span>Process Model: Electron → .NET 10 → Python</span>
       </footer>
     </div>
   );

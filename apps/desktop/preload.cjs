@@ -33,4 +33,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Context: dispatch captured frame to .NET /context/frame endpoint
   sendFrameContext: (frameBuffer, requestId) =>
     ipcRenderer.invoke('send-frame-context', { frameBuffer, requestId }),
+
+  // Configuration: retrieve backend port and session token for SignalR
+  getBackendConfig: () => ipcRenderer.invoke('get-backend-config'),
+
+  // Alerts: dispatch user acknowledgment/dismissal to .NET orchestrator
+  sendAlertResponse: (alertId, accepted) =>
+    ipcRenderer.invoke('send-alert-response', { alertId, accepted }),
+
+  // Help Now: trigger manual quick-help request to .NET orchestrator
+  triggerHelpNow: () => ipcRenderer.invoke('trigger-help-now'),
 });
+

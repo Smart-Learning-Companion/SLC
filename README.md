@@ -54,5 +54,6 @@ Full plan: see the team plan PDF. Contracts: `docs/contracts/`.
     cd services/orchestrator
     SLC_TOKEN=dev dotnet run            # PowerShell: $env:SLC_TOKEN="dev"; dotnet run
 
+This also starts the Python ML service. To start services by hand (debugging, mocks), set `SLC_DEV=1`.
 Listens on 127.0.0.1:8100. Contracts: `docs/contracts/`. Mocks: `services/ml/mocks/`.
 For the UI: connect SignalR to `http://127.0.0.1:8100/hub` with `accessTokenFactory: () => "dev"`.
