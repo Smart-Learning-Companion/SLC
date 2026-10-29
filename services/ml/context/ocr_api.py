@@ -1,4 +1,5 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, File, UploadFile
+
 from services.ml.context.ocr.ocr_service import ocr_image
 
 app = FastAPI()
@@ -6,10 +7,7 @@ app = FastAPI()
 
 @app.get("/")
 def root():
-    return {
-        "service": "OCR Service",
-        "status": "running"
-    }
+    return {"service": "OCR Service", "status": "running"}
 
 
 @app.post("/context/ocr")
@@ -20,5 +18,5 @@ async def context_ocr(file: UploadFile = File(...)):
         "result": ocr_image(image_bytes),
         "success": True,
         "filename": file.filename,
-        "size": len(image_bytes)
+        "size": len(image_bytes),
     }
