@@ -7,26 +7,37 @@ import urllib.request
 from contextlib import asynccontextmanager
 
 import uvicorn
+from context.ocr import ocr_image_ex, warm_up
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import JSONResponse
 from perception.worker import PerceptionWorker
 
 TOKEN = os.environ.get("SLC_TOKEN", "dev")
 ML_PORT = int(os.environ.get("SLC_ML_PORT", 8200))
 ORCH_PORT = int(os.environ.get("SLC_ORCH_PORT", 8100))
+CAMERA = int(
+    os.environ.get("SLC_CAMERA", 0)
+)  # change if the wrong camera opens (see v4l2-ctl --list-devices)
 
-try:
-    from context.ocr import ocr_image  # Inshaf's module: ocr_image(bytes) -> str
-except ImportError:
-
-    def ocr_image(data: bytes) -> str:  # stand-in until his module lands
-        return "def binary_search(arr, target):\n    ..."
+worker = PerceptionWorker(
+    f"http://127.0.0.1:{ORCH_PORT}/ingest/features", TOKEN, camera=CAMERA
+)
 
 
-worker = PerceptionWorker(f"http://127.0.0.1:{ORCH_PORT}/ingest/features", TOKEN)
+def _warm_ocr():
+    try:
+        warm_up()
+        print("OCR: models loaded", flush=True)
+    except Exception as e:
+        print(f"WARNING: OCR could not load: {e}", flush=True)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    threading.Thread(
+        target=_warm_ocr, daemon=True
+    ).start()  # load OCR models without delaying startup
     yield
     worker.stop()  # always release the camera on shutdown
 
@@ -40,8 +51,6 @@ async def require_token(request: Request, call_next):
         request.url.path != "/health"
         and request.headers.get("authorization") != f"Bearer {TOKEN}"
     ):
-        from fastapi.responses import JSONResponse
-
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     return await call_next(request)
 
@@ -69,10 +78,12 @@ async def context_ocr(request: Request):
     if not data:
         raise HTTPException(status_code=400, detail="empty body")
     t0 = time.perf_counter()
-    text = ocr_image(data)
+    out = await run_in_threadpool(
+        ocr_image_ex, data
+    )  # keep the event loop free while OCR runs
     return {
-        "text": text,
-        "confidence": 0.0,
+        "text": out.text,
+        "confidence": round(out.confidence, 3),
         "durationMs": round((time.perf_counter() - t0) * 1000),
     }
 
