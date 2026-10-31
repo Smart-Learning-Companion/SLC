@@ -51,6 +51,7 @@ internal sealed class MlProcessHost(
         psi.Environment["SLC_ORCH_PORT"] = settings.Port;
         psi.Environment["SLC_WATCHDOG"] = "1";        // Python exits if this process disappears (Day 3)
         psi.Environment["PYTHONUNBUFFERED"] = "1";    // deliver log lines immediately
+        psi.Environment.Remove("GEMINI_API_KEY"); // Python never needs the key; do not hand it over
 
         var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
         proc.OutputDataReceived += (_, e) => { if (e.Data is not null) log.LogInformation("[ml] {Line}", e.Data); };
