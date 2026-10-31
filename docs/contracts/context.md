@@ -15,6 +15,10 @@ One request runs at a time. A second request while one is running gets an immedi
 Failures also arrive as `explanation` events with `language: "en"` (could not read the screen,
 no readable text found, could not generate an explanation).
 
+Debug mode: `POST /context/frame?wait=true` holds the request until the pipeline finishes and returns
+`200 {"requestId": "...", "text": "...", "language": "si" or "en"}`. The `explanation` event is still sent.
+The UI uses the plain version (202).
+
 ## POST /context/ocr  (.NET -> Python)
 Headers: `Authorization: Bearer <token>`, `Content-Type: image/jpeg`.
 Body: raw image bytes. Response `200 application/json`:

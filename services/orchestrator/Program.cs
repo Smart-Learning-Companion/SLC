@@ -1,3 +1,5 @@
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.SignalR;
@@ -96,13 +98,22 @@ app.MapPost("/help/now", async (IHubContext<SlcHub> hub) =>
     return Results.Accepted();
 });
 
-app.MapPost("/context/frame", async (HttpRequest req, ExplainService explain) =>
+// Sinhala is shown as-is instead of \uXXXX escapes in the demo response.
+var demoJson = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+{
+    Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+};
+
+app.MapPost("/context/frame", async (HttpRequest req, ExplainService explain, bool? wait) =>
 {
     using var ms = new MemoryStream();
     await req.Body.CopyToAsync(ms);                       // frame stays in memory, never saved
     if (ms.Length == 0) return Results.BadRequest();
-    explain.Enqueue(ms.ToArray(), req.Headers["X-Request-Id"].ToString());
-    return Results.Accepted();                            // the explanation arrives over SignalR
+    var requestId = req.Headers["X-Request-Id"].ToString();
+    if (wait == true)                                     // demo/debug: hold the request, return the result
+        return Results.Json(await explain.ExplainAsync(ms.ToArray(), requestId), demoJson);
+    explain.Enqueue(ms.ToArray(), requestId);             // the real app: 202 now, result over SignalR
+    return Results.Accepted();
 });
 
 app.MapPost("/alerts/{id}/response", (string id, AlertResponse r) =>
