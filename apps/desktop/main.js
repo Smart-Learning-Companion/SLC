@@ -65,7 +65,7 @@ function getOrCreateDatabaseKey() {
 async function notifyBackendSession(action) {
   const endpoint = action === 'start' || action === 'resume' ? '/session/start' : action === 'pause' ? '/session/pause' : '/session/stop';
   try {
-    await fetch(`http://127.0.0.1:${backendPort}${endpoint}`, {
+    const res = await fetch(`http://127.0.0.1:${backendPort}${endpoint}`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${sessionToken}`,
@@ -73,8 +73,9 @@ async function notifyBackendSession(action) {
       },
       body: JSON.stringify({}),
     });
-  } catch {
-    // Backend may still be initializing or running standalone in dev
+    console.log(`[Electron Main] Session '${action}' -> ${endpoint} (Status: ${res.status})`);
+  } catch (err) {
+    console.warn(`[Electron Main] Session '${action}' notification failed: ${err.message}`);
   }
 }
 
@@ -85,6 +86,10 @@ function startBackendService() {
   }
 
   const dbKey = getOrCreateDatabaseKey();
+  const orchestratorDir = path.resolve(__dirname, '../../services/orchestrator');
+  const mlDir = path.resolve(__dirname, '../../services/ml');
+  const pythonExe = path.join(mlDir, '.venv', process.platform === 'win32' ? 'Scripts\\python.exe' : 'bin/python');
+
   const env = {
     ...process.env,
     SLC_TOKEN: sessionToken,
@@ -92,9 +97,12 @@ function startBackendService() {
     SLC_ML_PORT: String(mlPort),
     SLC_DATA_DIR: app.getPath('userData'),
     SLC_DB_KEY: dbKey,
+    SLC_ML_DIR: mlDir,
+    SLC_PYTHON: pythonExe,
+    SLC_GEMINI_MODEL: process.env.SLC_GEMINI_MODEL || 'gemini-3.6-flash',
+    SLC_GEMINI_FALLBACK_MODEL: process.env.SLC_GEMINI_FALLBACK_MODEL || 'gemini-3.5-flash-lite',
   };
 
-  const orchestratorDir = path.resolve(__dirname, '../../services/orchestrator');
   const mockBackendPath = path.join(__dirname, 'mock-backend.js');
   const hasOrchestrator = fs.existsSync(path.join(orchestratorDir, 'Slc.Orchestrator.csproj'));
   const forceMock = process.env.SLC_USE_MOCK === '1';
@@ -107,6 +115,7 @@ function startBackendService() {
     console.log(`[Electron Main] ${reason ? `[${reason}] ` : ''}Spawning contract mock backend service (127.0.0.1:${backendPort})...`);
     backendProcess = spawn(process.execPath, [mockBackendPath], {
       env,
+      cwd: __dirname,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     wireProcess(backendProcess);
@@ -129,10 +138,13 @@ function startBackendService() {
 
   if (!forceMock && hasOrchestrator) {
     console.log(`[Electron Main] Spawning .NET orchestrator service (127.0.0.1:${backendPort})...`);
+    console.log(`[Electron Main] Configured ML Dir: ${mlDir}`);
+    console.log(`[Electron Main] Configured Python: ${pythonExe}`);
     let isAlive = false;
     try {
       backendProcess = spawn('dotnet', ['run', '--project', orchestratorDir], {
         env,
+        cwd: orchestratorDir,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       wireProcess(backendProcess);

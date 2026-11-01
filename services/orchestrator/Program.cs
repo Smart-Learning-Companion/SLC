@@ -62,8 +62,8 @@ app.MapPost("/ingest/features", (FeaturePacket p, SessionState s) =>
 {
     s.Latest = p;
     var n = Interlocked.Increment(ref s.Count);
-    if (n % 25 == 0)
-        Console.WriteLine($"ingest #{n}: face={p.FaceFound} ear={p.Ear:F3} furrow={p.BrowFurrow:F2}");
+    if (n % 5 == 0 || n <= 3)
+        Console.WriteLine($"[Face Tracking #{n}] face={p.FaceFound} EAR={p.Ear:F3} blinks={p.BlinkRate:F1}/min");
     return Results.NoContent();
 });
 
