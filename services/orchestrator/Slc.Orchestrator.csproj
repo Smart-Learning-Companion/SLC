@@ -6,4 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <ItemGroup>
+    <None Update="Prompts\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

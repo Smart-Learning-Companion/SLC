@@ -12,3 +12,7 @@ query string for WebSockets; browsers cannot set headers on a WebSocket).
 
 Flow for quick-help: UI calls POST /help/now, .NET sends `captureRequest`, UI posts the frame
 to /context/frame, .NET forwards it to Python /context/ocr, then Gemini, then `explanation`.
+
+## Notes on `explanation`
+- `language` is `"si"` for a Gemini explanation and `"en"` for status or error messages. The UI should render both.
+- The text may be several paragraphs. English technical terms are kept untranslated inside the Sinhala text.

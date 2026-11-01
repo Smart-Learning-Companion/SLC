@@ -1,8 +1,14 @@
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.SignalR;
+using Slc.Orchestrator;
 
-var token = Environment.GetEnvironmentVariable("SLC_TOKEN") ?? "dev";
+// SLC_DEV=1 means "services are started by hand": allow the dev token and do not launch Python.
+var dev = Environment.GetEnvironmentVariable("SLC_DEV") == "1";
+var token = Environment.GetEnvironmentVariable("SLC_TOKEN")
+    ?? (dev ? "dev" : throw new InvalidOperationException("SLC_TOKEN is not set (SLC_DEV=1 allows the dev token)."));
 var port = Environment.GetEnvironmentVariable("SLC_PORT") ?? "8100";
 var mlPort = Environment.GetEnvironmentVariable("SLC_ML_PORT") ?? "8200";
 
@@ -10,16 +16,27 @@ var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls($"http://127.0.0.1:{port}");
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<SessionState>();
+builder.Services.AddSingleton(new SlcSettings(token, port, mlPort, dev));
 // Localhost only + bearer token, so any origin is acceptable (Electron serves the UI from file:// or Vite).
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddHttpClient("ml", c =>
 {
     c.BaseAddress = new Uri($"http://127.0.0.1:{mlPort}");
-    c.Timeout = TimeSpan.FromSeconds(15);
+    c.Timeout = TimeSpan.FromSeconds(30);
     c.DefaultRequestHeaders.Authorization = new("Bearer", token);
 });
+builder.Services.AddHttpClient("gemini", c =>
+{
+    c.BaseAddress = new Uri("https://generativelanguage.googleapis.com/");
+    c.Timeout = TimeSpan.FromSeconds(25);   // per attempt; GeminiClient retries once
+});
+builder.Services.AddSingleton<GeminiClient>();
+builder.Services.AddSingleton<ExplainService>();
+builder.Services.AddHostedService<MlProcessHost>();
 
 var app = builder.Build();
+if (string.IsNullOrWhiteSpace(app.Configuration["GEMINI_API_KEY"]) || string.IsNullOrWhiteSpace(app.Configuration["SLC_GEMINI_MODEL"]))
+    app.Logger.LogWarning("GEMINI_API_KEY or SLC_GEMINI_MODEL is not set; explanations will fail.");
 app.UseCors();
 
 // Token check on everything except /health. The SignalR WebSocket passes it as ?access_token=.
@@ -81,19 +98,21 @@ app.MapPost("/help/now", async (IHubContext<SlcHub> hub) =>
     return Results.Accepted();
 });
 
-app.MapPost("/context/frame", async (HttpRequest req, IHttpClientFactory f, IHubContext<SlcHub> hub) =>
+// Sinhala is shown as-is instead of \uXXXX escapes in the demo response.
+var demoJson = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+{
+    Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+};
+
+app.MapPost("/context/frame", async (HttpRequest req, ExplainService explain, bool? wait) =>
 {
     using var ms = new MemoryStream();
     await req.Body.CopyToAsync(ms);                       // frame stays in memory, never saved
+    if (ms.Length == 0) return Results.BadRequest();
     var requestId = req.Headers["X-Request-Id"].ToString();
-    using var content = new ByteArrayContent(ms.ToArray());
-    content.Headers.ContentType = new("image/jpeg");
-    using var resp = await f.CreateClient("ml").PostAsync("/context/ocr", content);
-    if (!resp.IsSuccessStatusCode) return Results.StatusCode(StatusCodes.Status502BadGateway);
-    var ocr = await resp.Content.ReadFromJsonAsync<OcrResult>();
-    // Gemini comes in Week 4. For now echo the OCR text so the UI panel has something to show.
-    await hub.Clients.All.SendAsync("explanation",
-        new { requestId, text = $"[mock] OCR saw: {ocr?.Text}", language = "en" });
+    if (wait == true)                                     // demo/debug: hold the request, return the result
+        return Results.Json(await explain.ExplainAsync(ms.ToArray(), requestId), demoJson);
+    explain.Enqueue(ms.ToArray(), requestId);             // the real app: 202 now, result over SignalR
     return Results.Accepted();
 });
 
@@ -109,6 +128,7 @@ app.Run();
 
 record FeaturePacket(double T, bool FaceFound, Dictionary<string, double>? Fer, double? Ear, double? BlinkRate,
     double? BrowFurrow, double? MouthOpen, double? HeadPitch, double? HeadYaw, Dictionary<string, double>? States);
+record SlcSettings(string Token, string Port, string MlPort, bool Dev);
 record AlertResponse(bool Accepted);
 record OcrResult(string Text, double Confidence, double DurationMs);
 class SlcHub : Hub { }
