@@ -44,11 +44,16 @@ sealed class ExplainService(
             if (ocr is null) return new(requestId, "Could not read the screen.", "en");
 
             var text = ocr.Text?.Trim() ?? "";
+            Console.WriteLine($"\n==================== [Screen OCR Extracted Text] ({text.Length} chars, Confidence: {ocr.Confidence:P0}) ====================");
+            Console.WriteLine(text);
+            Console.WriteLine("====================================================================================================\n");
             if (text.Length < MinChars) return new(requestId, "No readable text found on the screen.", "en");
             if (text.Length > MaxChars) text = text[..MaxChars];
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-            return new(requestId, await gemini.ExplainAsync(text, cts.Token), "si");
+            var explanation = await gemini.ExplainAsync(text, cts.Token);
+            Console.WriteLine($"[Gemini Sinhala Response] Generated {explanation.Length} chars: \"{explanation[..Math.Min(80, explanation.Length)].Replace("\r", "").Replace("\n", " ")}...\"");
+            return new(requestId, explanation, "si");
         }
         catch (Exception ex)
         {
