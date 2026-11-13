@@ -870,33 +870,31 @@
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
-/* Quick Help Button */
+/* Quick Help Button in Dashboard */
 .btn-help {
-  background: linear-gradient(135deg, #1f6feb 0%, #8957e5 100%);
+  background-color: #1f6feb;
   color: #ffffff;
-  border: none;
-  font-weight: 600;
-  padding: 6px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-weight: 500;
+  height: 32px;
+  padding: 0 14px;
   border-radius: 6px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.2s ease;
-  box-shadow: 0 2px 8px rgba(137, 87, 229, 0.25);
+  transition: all 0.15s ease;
 }
 
-.btn-help:hover {
-  opacity: 0.92;
-  box-shadow: 0 4px 12px rgba(137, 87, 229, 0.4);
-  transform: translateY(-1px);
+.btn-help:hover:not(:disabled) {
+  background-color: #388bfd;
+  border-color: rgba(255, 255, 255, 0.25);
 }
 
 .btn-help:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
-  transform: none;
 }
 
 /* Floating Side Overlay AI Tutor Chat Panel (Glassmorphism & Opacity) */
@@ -992,11 +990,18 @@
   color: #58a6ff;
 }
 
+.overlay-chat-header-actions,
+.overlay-chat-header-actions *,
+.chat-header-btn,
+.chat-header-btn * {
+  -webkit-app-region: no-drag !important;
+  pointer-events: auto !important;
+}
+
 .overlay-chat-header-actions {
   display: flex;
   align-items: center;
   gap: 4px;
-  -webkit-app-region: no-drag !important;
 }
 
 .chat-header-btn {
@@ -1011,12 +1016,18 @@
   justify-content: center;
   font-size: 12px;
   transition: all 0.15s ease;
-  -webkit-app-region: no-drag !important;
 }
 
 .chat-header-btn:hover {
   background-color: #21262d;
   color: #f0f6fc;
+}
+
+.overlay-chat-messages,
+.overlay-chat-messages *,
+.chat-bubble,
+.chat-bubble * {
+  -webkit-app-region: no-drag !important;
 }
 
 .overlay-chat-messages {
@@ -1115,6 +1126,13 @@
 }
 
 /* Quick Chips */
+.overlay-quick-chips,
+.overlay-quick-chips *,
+.overlay-quick-chips button {
+  -webkit-app-region: no-drag !important;
+  pointer-events: auto !important;
+}
+
 .overlay-quick-chips {
   display: flex;
   gap: 6px;
@@ -1149,6 +1167,14 @@
 }
 
 /* Chat Input Form */
+.overlay-chat-input-form,
+.overlay-chat-input-form *,
+.overlay-chat-input,
+.overlay-chat-send-btn {
+  -webkit-app-region: no-drag !important;
+  pointer-events: auto !important;
+}
+
 .overlay-chat-input-form {
   display: flex;
   align-items: center;

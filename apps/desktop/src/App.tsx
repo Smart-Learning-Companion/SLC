@@ -730,8 +730,6 @@ function Dashboard() {
   const [signalRConnected, setSignalRConnected] = useState(false);
   const [backendPort, setBackendPort] = useState<string>('8100');
   const [activeAlert, setActiveAlert] = useState<SoftAlert | null>(null);
-  const [activeExplanation, setActiveExplanation] = useState<ActiveExplanation | null>(null);
-  const [explanationLang, setExplanationLang] = useState<'si' | 'en'>('si');
   const [requestingHelp, setRequestingHelp] = useState(false);
 
   // Persistent MediaStream and hidden playback Video element
@@ -849,7 +847,6 @@ function Dashboard() {
     cleanupStream();
     setSessionState('idle');
     setActiveAlert(null);
-    setActiveExplanation(null);
     setLastCapture((prev) => {
       if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
       return null;
@@ -925,12 +922,6 @@ function Dashboard() {
             const expData = dispatchRes.data;
             console.log('[Direct HTTP Explanation Result]', expData);
             window.electronAPI?.logExplanation?.(expData);
-            setActiveExplanation({
-              requestId: expData.requestId || reqId,
-              text: expData.text,
-              language: expData.language || 'si',
-              timestamp: new Date().toLocaleTimeString(),
-            });
             setRequestingHelp(false);
           }
         } catch (dispatchErr) {
@@ -1034,12 +1025,6 @@ function Dashboard() {
           if (!isMounted) return;
           console.log('[SignalR Explanation Event]', data);
           window.electronAPI?.logExplanation?.(data);
-          setActiveExplanation({
-            requestId: data.requestId,
-            text: data.text,
-            language: data.language || 'en',
-            timestamp: new Date().toLocaleTimeString(),
-          });
           setRequestingHelp(false);
         });
 
@@ -1250,51 +1235,6 @@ function Dashboard() {
           </div>
         )}
 
-        {/* AI Tutor Contextual Explanation Card */}
-        {activeExplanation && (
-          <div className="explanation-panel">
-            <div className="explanation-header">
-              <div className="explanation-title-row">
-                <span className="explanation-icon"><SparklesIcon /></span>
-                <h3 className="explanation-title">Contextual AI Tutor Assistance</h3>
-              </div>
-              <div className="explanation-controls">
-                <div className="lang-toggle">
-                  <button
-                    type="button"
-                    className={`lang-btn ${explanationLang === 'si' ? 'active' : ''}`}
-                    onClick={() => setExplanationLang('si')}
-                  >
-                    සිංහල
-                  </button>
-                  <button
-                    type="button"
-                    className={`lang-btn ${explanationLang === 'en' ? 'active' : ''}`}
-                    onClick={() => setExplanationLang('en')}
-                  >
-                    English
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-mini"
-                  onClick={() => setActiveExplanation(null)}
-                  title="Dismiss explanation"
-                >
-                  <CloseIcon />
-                </button>
-              </div>
-            </div>
-            <div className="explanation-body">
-              {activeExplanation.text}
-            </div>
-            <div className="explanation-footer">
-              <span className="explanation-req-badge">Req ID: {activeExplanation.requestId}</span>
-              <span>Delivered at {activeExplanation.timestamp} · Privacy Verified</span>
-            </div>
-          </div>
-        )}
-
         {/* Session Control Panel */}
         <section className="panel">
           <div className="panel-header">
@@ -1322,12 +1262,12 @@ function Dashboard() {
                 <>
                   <button
                     type="button"
-                    className="btn-help"
+                    className="btn btn-help"
                     onClick={handleTriggerQuickHelp}
                     disabled={requestingHelp}
                     title="Request immediate contextual explanation"
                   >
-                    <SparklesIcon /> {requestingHelp ? 'Analyzing...' : 'Help Now'}
+                    <HelpCircleIcon /> {requestingHelp ? 'Analyzing...' : 'Help Now'}
                   </button>
 
                   {sessionState === 'monitoring' ? (

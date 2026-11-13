@@ -235,24 +235,10 @@ function createFloatingWidget() {
   });
 
   floatingWidget.setBackgroundColor('#00000000');
-  floatingWidget.setAlwaysOnTop(true, 'screen-saver');
+  floatingWidget.setAlwaysOnTop(true, 'floating');
   try {
     floatingWidget.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   } catch { /* platform specific */ }
-
-  // Re-assert topmost level so clicking another window never buries the widget
-  floatingWidget.on('blur', () => {
-    if (floatingWidget && !floatingWidget.isDestroyed()) {
-      floatingWidget.setAlwaysOnTop(true, 'screen-saver');
-      floatingWidget.moveTop();
-    }
-  });
-
-  floatingWidget.on('focus', () => {
-    if (floatingWidget && !floatingWidget.isDestroyed()) {
-      floatingWidget.setAlwaysOnTop(true, 'screen-saver');
-    }
-  });
 
   // Track user dragging the collapsed mini bar so we always preserve their chosen spot
   floatingWidget.on('move', () => {
@@ -292,8 +278,7 @@ function showFloatingWidget() {
     createFloatingWidget();
   }
   floatingWidget?.show();
-  floatingWidget?.setAlwaysOnTop(true, 'screen-saver');
-  floatingWidget?.moveTop();
+  floatingWidget?.setAlwaysOnTop(true, 'floating');
   floatingWidget?.webContents.send('sync-session-state', currentSessionState);
 }
 
@@ -438,8 +423,7 @@ ipcMain.on('log-explanation', (_event, data) => {
 
   if (floatingWidget && !floatingWidget.isDestroyed()) {
     floatingWidget.show();
-    floatingWidget.setAlwaysOnTop(true, 'screen-saver');
-    floatingWidget.moveTop();
+    floatingWidget.setAlwaysOnTop(true, 'floating');
     floatingWidget.webContents.send('new-explanation', data);
   }
 });
@@ -482,8 +466,7 @@ ipcMain.on('resize-widget', (_event, expanded) => {
       width: chatWidth,
       height: chatHeight,
     });
-    floatingWidget.setAlwaysOnTop(true, 'screen-saver');
-    floatingWidget.moveTop();
+    floatingWidget.setAlwaysOnTop(true, 'floating');
   } else {
     isWidgetExpanded = false;
     let targetX;
@@ -524,8 +507,7 @@ ipcMain.on('resize-widget', (_event, expanded) => {
       width: widgetWidth,
       height: widgetHeight,
     });
-    floatingWidget.setAlwaysOnTop(true, 'screen-saver');
-    floatingWidget.moveTop();
+    floatingWidget.setAlwaysOnTop(true, 'floating');
   }
 });
 
