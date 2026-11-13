@@ -14,20 +14,35 @@ if (process.platform === 'linux') {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Ensure single instance only — prevent duplicate windows/conflicts
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  console.warn('[Electron Main] Another instance is already running. Quitting.');
+  app.quit();
+  process.exit(0);
+}
+
+app.on('second-instance', () => {
+  restoreMainWindow();
+});
+
 let mainWindow = null;
 let floatingWidget = null;
+let isWidgetExpanded = false;
+let savedMiniBounds = null;
+let expandedInitialBounds = null;
 let currentSessionState = 'idle'; // 'idle' | 'monitoring' | 'paused'
 let backendProcess = null;
 
 // ==========================================
-// 🔒 PRIVACY BY DESIGN: Security Token Setup
+// PRIVACY BY DESIGN: Security Token Setup
 // ==========================================
 const sessionToken = crypto.randomBytes(32).toString('hex');
 const backendPort = process.env.SLC_PORT || '8100';
 const mlPort = process.env.SLC_ML_PORT || '8200';
 
 // ==========================================
-// 🔒 PRIVACY BY DESIGN: SQLCipher DB Key Setup
+// PRIVACY BY DESIGN: SQLCipher DB Key Setup
 // ==========================================
 function getOrCreateDatabaseKey() {
   const userDataDir = app.getPath('userData');
@@ -85,6 +100,12 @@ function startBackendService() {
   }
 
   const dbKey = getOrCreateDatabaseKey();
+  const orchestratorDir = path.resolve(__dirname, '../../services/orchestrator');
+  const mlDir = path.resolve(__dirname, '../../services/ml');
+  const mockBackendPath = path.join(__dirname, 'mock-backend.js');
+  const hasOrchestrator = fs.existsSync(path.join(orchestratorDir, 'Slc.Orchestrator.csproj'));
+  const forceMock = process.env.SLC_USE_MOCK === '1';
+
   const env = {
     ...process.env,
     SLC_TOKEN: sessionToken,
@@ -92,12 +113,10 @@ function startBackendService() {
     SLC_ML_PORT: String(mlPort),
     SLC_DATA_DIR: app.getPath('userData'),
     SLC_DB_KEY: dbKey,
+    SLC_ML_DIR: mlDir,
+    SLC_GEMINI_MODEL: (process.env.SLC_GEMINI_MODEL && !process.env.SLC_GEMINI_MODEL.includes('2.5')) ? process.env.SLC_GEMINI_MODEL : 'gemini-3.5-flash-lite',
+    SLC_GEMINI_FALLBACK_MODEL: (process.env.SLC_GEMINI_FALLBACK_MODEL && !process.env.SLC_GEMINI_FALLBACK_MODEL.includes('2.5')) ? process.env.SLC_GEMINI_FALLBACK_MODEL : 'gemini-3.1-flash-lite',
   };
-
-  const orchestratorDir = path.resolve(__dirname, '../../services/orchestrator');
-  const mockBackendPath = path.join(__dirname, 'mock-backend.js');
-  const hasOrchestrator = fs.existsSync(path.join(orchestratorDir, 'Slc.Orchestrator.csproj'));
-  const forceMock = process.env.SLC_USE_MOCK === '1';
 
   function spawnMock(reason) {
     if (backendProcess && !backendProcess.killed) {
@@ -132,6 +151,7 @@ function startBackendService() {
     let isAlive = false;
     try {
       backendProcess = spawn('dotnet', ['run', '--project', orchestratorDir], {
+        cwd: orchestratorDir,
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
@@ -140,6 +160,12 @@ function startBackendService() {
       const startupTimer = setTimeout(() => {
         isAlive = true;
       }, 3000);
+
+      backendProcess.on('error', (err) => {
+        clearTimeout(startupTimer);
+        console.warn(`[Electron Main] Dotnet launch error: ${err.message}. Falling back to mock backend.`);
+        spawnMock('Fallback from dotnet execution error');
+      });
 
       backendProcess.once('exit', (code) => {
         clearTimeout(startupTimer);
@@ -170,7 +196,7 @@ function stopBackendService() {
 }
 
 // ==========================================
-// 🪟 FRAMELESS FLOATING WIDGET (Zoom-style)
+// FRAMELESS FLOATING WIDGET (Zoom-style)
 // ==========================================
 function createFloatingWidget() {
   if (floatingWidget && !floatingWidget.isDestroyed()) return;
@@ -178,22 +204,27 @@ function createFloatingWidget() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width, height } = primaryDisplay.workArea;
 
-  const widgetWidth = 340;
-  const widgetHeight = 48;
+  const widgetWidth = 400;
+  const widgetHeight = 44;
   const margin = 24;
+
+  const initialX = savedMiniBounds?.x ?? (width - widgetWidth - margin);
+  const initialY = savedMiniBounds?.y ?? (height - widgetHeight - margin);
+  savedMiniBounds = { x: initialX, y: initialY };
+  isWidgetExpanded = false;
 
   floatingWidget = new BrowserWindow({
     width: widgetWidth,
     height: widgetHeight,
-    x: width - widgetWidth - margin,
-    y: height - widgetHeight - margin,
+    x: initialX,
+    y: initialY,
     frame: false,
-    transparent: false,
-    backgroundColor: '#1c2128',
+    transparent: true,
+    backgroundColor: '#00000000',
     alwaysOnTop: true,
-    resizable: false,
+    resizable: true,
     skipTaskbar: true,
-    hasShadow: true,
+    hasShadow: false,
     show: false,
     roundedCorners: true,
     webPreferences: {
@@ -201,6 +232,34 @@ function createFloatingWidget() {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+
+  floatingWidget.setBackgroundColor('#00000000');
+  floatingWidget.setAlwaysOnTop(true, 'screen-saver');
+  try {
+    floatingWidget.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  } catch { /* platform specific */ }
+
+  // Re-assert topmost level so clicking another window never buries the widget
+  floatingWidget.on('blur', () => {
+    if (floatingWidget && !floatingWidget.isDestroyed()) {
+      floatingWidget.setAlwaysOnTop(true, 'screen-saver');
+      floatingWidget.moveTop();
+    }
+  });
+
+  floatingWidget.on('focus', () => {
+    if (floatingWidget && !floatingWidget.isDestroyed()) {
+      floatingWidget.setAlwaysOnTop(true, 'screen-saver');
+    }
+  });
+
+  // Track user dragging the collapsed mini bar so we always preserve their chosen spot
+  floatingWidget.on('move', () => {
+    if (!isWidgetExpanded && floatingWidget && !floatingWidget.isDestroyed()) {
+      const b = floatingWidget.getBounds();
+      savedMiniBounds = { x: b.x, y: b.y };
+    }
   });
 
   // Security: Block any external navigation or popups from floating widget
@@ -233,6 +292,8 @@ function showFloatingWidget() {
     createFloatingWidget();
   }
   floatingWidget?.show();
+  floatingWidget?.setAlwaysOnTop(true, 'screen-saver');
+  floatingWidget?.moveTop();
   floatingWidget?.webContents.send('sync-session-state', currentSessionState);
 }
 
@@ -294,9 +355,12 @@ ipcMain.on('trigger-session-action', (_event, action) => {
 });
 
 // Contract context.md: POST raw JPEG bytes to /context/frame
-ipcMain.handle('send-frame-context', async (_event, { frameBuffer, requestId }) => {
+ipcMain.handle('send-frame-context', async (_event, { frameBuffer, requestId, wait }) => {
   try {
-    const res = await fetch(`http://127.0.0.1:${backendPort}/context/frame`, {
+    const url = wait
+      ? `http://127.0.0.1:${backendPort}/context/frame?wait=true`
+      : `http://127.0.0.1:${backendPort}/context/frame`;
+    const res = await fetch(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${sessionToken}`,
@@ -305,6 +369,15 @@ ipcMain.handle('send-frame-context', async (_event, { frameBuffer, requestId }) 
       },
       body: Buffer.from(frameBuffer),
     });
+
+    let data = null;
+    if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      }
+      return { success: true, status: res.status, data };
+    }
     return { success: res.ok, status: res.status };
   } catch (err) {
     console.error('[Electron Main] Failed to dispatch frame context to backend:', err);
@@ -354,6 +427,183 @@ ipcMain.handle('trigger-help-now', async () => {
   }
 });
 
+// Diagnostic: Print explanation to terminal & forward to floating widget
+ipcMain.on('log-explanation', (_event, data) => {
+  console.log('\n==================== [AI TUTOR EXPLANATION] ====================');
+  console.log(`Language : ${data.language || 'si'}`);
+  console.log(`RequestID: ${data.requestId}`);
+  console.log('-------------------------------------------------------------------');
+  console.log(data.text);
+  console.log('===================================================================\n');
+
+  if (floatingWidget && !floatingWidget.isDestroyed()) {
+    floatingWidget.show();
+    floatingWidget.setAlwaysOnTop(true, 'screen-saver');
+    floatingWidget.moveTop();
+    floatingWidget.webContents.send('new-explanation', data);
+  }
+});
+
+// Floating Side Overlay Chat Controls (Smart Position Preserving)
+ipcMain.on('resize-widget', (_event, expanded) => {
+  if (!floatingWidget || floatingWidget.isDestroyed()) return;
+  const bounds = floatingWidget.getBounds();
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
+
+  const widgetWidth = 400;
+  const widgetHeight = 44;
+  const chatWidth = 420;
+  const chatHeight = Math.min(650, screenHeight - 60);
+
+  if (expanded) {
+    isWidgetExpanded = true;
+    // Always snapshot the exact mini bar position immediately prior to expanding
+    savedMiniBounds = { x: bounds.x, y: bounds.y };
+
+    // Anchor to mini bar: align right edges so chat extends naturally
+    let x = bounds.x + bounds.width - chatWidth;
+    // If mini bar is in lower half of screen, expand upwards from its bottom edge
+    let y = (bounds.y + bounds.height > screenHeight / 2)
+      ? (bounds.y + bounds.height - chatHeight)
+      : bounds.y;
+
+    // Bounds checking
+    if (x + chatWidth > screenWidth - 16) x = screenWidth - chatWidth - 16;
+    if (y + chatHeight > screenHeight - 16) y = screenHeight - chatHeight - 16;
+    if (x < 16) x = 16;
+    if (y < 16) y = 16;
+
+    expandedInitialBounds = { x: Math.round(x), y: Math.round(y) };
+
+    floatingWidget.setBounds({
+      x: expandedInitialBounds.x,
+      y: expandedInitialBounds.y,
+      width: chatWidth,
+      height: chatHeight,
+    });
+    floatingWidget.setAlwaysOnTop(true, 'screen-saver');
+    floatingWidget.moveTop();
+  } else {
+    isWidgetExpanded = false;
+    let targetX;
+    let targetY;
+
+    // Check if the user manually dragged the chat drawer while it was open
+    const userMovedChat = expandedInitialBounds && (
+      Math.abs(bounds.x - expandedInitialBounds.x) > 10 ||
+      Math.abs(bounds.y - expandedInitialBounds.y) > 10
+    );
+
+    if (userMovedChat) {
+      // If user moved the chat, collapse near where they left the chat
+      targetX = bounds.x + bounds.width - widgetWidth;
+      targetY = (bounds.y + bounds.height > screenHeight / 2)
+        ? (bounds.y + bounds.height - widgetHeight)
+        : bounds.y;
+    } else if (savedMiniBounds) {
+      // User did not drag chat: Restore exactly to where the user dragged the mini bar!
+      targetX = savedMiniBounds.x;
+      targetY = savedMiniBounds.y;
+    } else {
+      targetX = bounds.x;
+      targetY = bounds.y;
+    }
+
+    // Keep within screen work area
+    if (targetX + widgetWidth > screenWidth - 16) targetX = screenWidth - widgetWidth - 16;
+    if (targetY + widgetHeight > screenHeight - 16) targetY = screenHeight - widgetHeight - 16;
+    if (targetX < 16) targetX = 16;
+    if (targetY < 16) targetY = 16;
+
+    savedMiniBounds = { x: Math.round(targetX), y: Math.round(targetY) };
+
+    floatingWidget.setBounds({
+      x: savedMiniBounds.x,
+      y: savedMiniBounds.y,
+      width: widgetWidth,
+      height: widgetHeight,
+    });
+    floatingWidget.setAlwaysOnTop(true, 'screen-saver');
+    floatingWidget.moveTop();
+  }
+});
+
+ipcMain.on('request-screen-capture', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('request-screen-capture');
+  }
+});
+
+ipcMain.handle('send-chat-message', async (_event, { history, message, contextText }) => {
+  const key = process.env.GEMINI_API_KEY;
+  const model = process.env.SLC_GEMINI_MODEL || 'gemini-3.5-flash-lite';
+  const fallbackModel = process.env.SLC_GEMINI_FALLBACK_MODEL || 'gemini-3.1-flash-lite';
+
+  if (!key) {
+    return { success: false, error: 'GEMINI_API_KEY is not configured.' };
+  }
+
+  const systemPrompt = `You are a patient, encouraging, and clear AI Tutor assisting a university student studying computer science and technology.
+The student is interacting with you in a side-overlay live chat companion.
+Explain concepts in natural, conversational Sinhala (or English if the student asks in English).
+CRITICAL RULE: Always keep English technical terms (such as function, array, recursion, API, database, async, loop, bug, exception, etc.) in English script without transliterating them into Sinhala script, but explain their meaning in Sinhala.
+Be concise, helpful, and provide short code examples where helpful.
+${contextText ? `\n[Context from Student's Screen]:\n${contextText}\n` : ''}`;
+
+  const contents = (history || []).map((h) => ({
+    role: h.role === 'user' ? 'user' : 'model',
+    parts: [{ text: h.text }],
+  }));
+
+  contents.push({
+    role: 'user',
+    parts: [{ text: message }],
+  });
+
+  async function callGemini(selectedModel) {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': key,
+      },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents,
+        generationConfig: {
+          temperature: 0.4,
+          maxOutputTokens: 2048,
+        },
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Gemini HTTP ${res.status}: ${errText}`);
+    }
+
+    const json = await res.json();
+    const reply = json.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!reply) throw new Error('No reply generated by Gemini');
+    return reply;
+  }
+
+  try {
+    const reply = await callGemini(model);
+    return { success: true, reply };
+  } catch (err) {
+    console.warn(`[Chat] Primary model ${model} failed: ${err.message}. Trying fallback ${fallbackModel}...`);
+    try {
+      const reply = await callGemini(fallbackModel);
+      return { success: true, reply };
+    } catch (fallbackErr) {
+      console.error('[Chat] Both models failed:', fallbackErr);
+      return { success: false, error: fallbackErr.message };
+    }
+  }
+});
+
 ipcMain.on('restore-main-window', () => {
   restoreMainWindow();
 });
@@ -379,6 +629,12 @@ function createWindow() {
 
   // Security: Block popups and unauthorized external navigation
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
+  // Forward renderer console logs directly to terminal stdout
+  mainWindow.webContents.on('console-message', (_event, _level, message) => {
+    console.log(`[Renderer UI] ${message}`);
+  });
+
   mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
     const parsedUrl = new URL(navigationUrl);
     if (parsedUrl.origin !== 'http://localhost:5173') {
@@ -412,7 +668,16 @@ function createWindow() {
     }
   });
 
-  mainWindow.loadURL('http://localhost:5173');
+  const loadApp = () => {
+    mainWindow.loadURL('http://localhost:5173').catch(() => {
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          loadApp();
+        }
+      }, 500);
+    });
+  };
+  loadApp();
 }
 
 app.whenReady().then(() => {

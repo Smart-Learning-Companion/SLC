@@ -12,10 +12,16 @@ declare global {
       onSessionAction: (callback: (action: string) => void) => () => void;
       restoreMainWindow: () => void;
       minimizeToWidget: () => void;
-      sendFrameContext: (frameBuffer: ArrayBuffer, requestId?: string) => Promise<{ success: boolean; status?: number; error?: string }>;
+      sendFrameContext: (frameBuffer: ArrayBuffer, requestId?: string, wait?: boolean) => Promise<{ success: boolean; status?: number; data?: { requestId: string; text: string; language: string }; error?: string }>;
       getBackendConfig?: () => Promise<{ port: string; token: string }>;
       sendAlertResponse?: (alertId: string, accepted: boolean) => Promise<{ success: boolean; status?: number; error?: string }>;
       triggerHelpNow?: () => Promise<{ success: boolean; status?: number; error?: string }>;
+      logExplanation?: (data: { requestId: string; text: string; language: string }) => void;
+      resizeWidget?: (expanded: boolean) => void;
+      onNewExplanation?: (callback: (data: { requestId: string; text: string; language?: string }) => void) => () => void;
+      sendChatMessage?: (data: { history: { role: string; text: string }[]; message: string; contextText?: string }) => Promise<{ success: boolean; reply?: string; error?: string }>;
+      requestScreenCapture?: () => void;
+      onRequestScreenCapture?: (callback: () => void) => () => void;
     };
   }
 }
@@ -45,7 +51,7 @@ export interface ActiveExplanation {
 
 type SessionState = 'idle' | 'monitoring' | 'paused';
 
-// ─── 🎨 Handcrafted Professional SVG Icons ─────────────────────────────────────
+// ─── Handcrafted Professional SVG Icons ─────────────────────────────────────────
 function ShieldIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -176,118 +182,428 @@ function SparklesIcon() {
   );
 }
 
+function GripIcon() {
+  return (
+    <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" aria-hidden="true">
+      <circle cx="3" cy="2" r="1.2" />
+      <circle cx="7" cy="2" r="1.2" />
+      <circle cx="3" cy="7" r="1.2" />
+      <circle cx="7" cy="7" r="1.2" />
+      <circle cx="3" cy="12" r="1.2" />
+      <circle cx="7" cy="12" r="1.2" />
+    </svg>
+  );
+}
+
+function MessageSquareIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
+function HelpCircleIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  );
+}
+
+function SendIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="22" y1="2" x2="11" y2="13" />
+      <polygon points="22 2 15 22 11 13 2 9 22 2" />
+    </svg>
+  );
+}
 
 
-// ─── Floating Widget (separate BrowserWindow) ─────────────────────────────────
+
+// ─── Floating Side Overlay AI Tutor Chat (separate BrowserWindow) ─────────────
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'tutor';
+  text: string;
+  timestamp: string;
+}
+
 function FloatingWidget() {
   const [state, setState] = useState<SessionState>('idle');
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      id: 'init',
+      role: 'tutor',
+      text: 'ආයුබෝවන්! මම ඔබගේ AI Companion Tutor. Screen එකේ ඇති පාඩම හෝ කේතය පිළිබඳ ඕනෑම ගැටලුවක් මෙතනින් විමසන්න.',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    },
+  ]);
+  const [inputText, setInputText] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [screenContext, setScreenContext] = useState<string>('');
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-scroll on new messages
+  useEffect(() => {
+    if (isExpanded) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, isExpanded, isTyping, isAnalyzing]);
+
+  const toggleExpand = (expand?: boolean) => {
+    const next = expand !== undefined ? expand : !isExpanded;
+    setIsExpanded(next);
+    window.electronAPI?.resizeWidget?.(next);
+  };
 
   useEffect(() => {
-    // Fetch authoritative state from main process on mount
-    window.electronAPI?.getCurrentSessionState().then((s) => {
+    window.electronAPI?.getCurrentSessionState?.().then((s) => {
       if (s) setState(s as SessionState);
     });
 
-    // Subscribe to live state broadcasts from main process
-    const unsubscribe = window.electronAPI?.onSyncSessionState((newState) => {
+    const unsubSync = window.electronAPI?.onSyncSessionState?.((newState) => {
       setState(newState as SessionState);
     });
 
-    return () => unsubscribe?.();
+    // When an explanation arrives from OCR + Gemini
+    const unsubExp = window.electronAPI?.onNewExplanation?.((data) => {
+      console.log('[FloatingWidget] Received new explanation:', data);
+      setIsAnalyzing(false);
+      if (data?.text) {
+        setScreenContext(data.text);
+        // Fresh context: replaces previous screen explanation with this new capture
+        setMessages([
+          {
+            id: `exp_${Date.now()}`,
+            role: 'tutor',
+            text: `[Screen Analysis - ${data.language === 'en' ? 'English' : 'සිංහල'}]\n\n${data.text}`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+        toggleExpand(true);
+      }
+    });
+
+    return () => {
+      unsubSync?.();
+      unsubExp?.();
+    };
   }, []);
 
+  // Quick Help: Captures screen, clears previous screen context, and requests new explanation
+  const handleQuickHelp = () => {
+    if (state === 'idle') {
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setScreenContext('');
+    setMessages([
+      {
+        id: `loading_${Date.now()}`,
+        role: 'tutor',
+        text: 'Screen එක Capture කරමින් AI Tutor වෙතින් විස්තරය ලබාගනිමින් පවතී... කරුණාකර රැඳෙන්න...',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      },
+    ]);
+
+    toggleExpand(true);
+    window.electronAPI?.requestScreenCapture?.();
+  };
+
+  const handleSendMessage = async (textToSend?: string) => {
+    const text = (textToSend || inputText).trim();
+    if (!text || isTyping || isAnalyzing) return;
+
+    const userMsg: ChatMessage = {
+      id: `usr_${Date.now()}`,
+      role: 'user',
+      text,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    setMessages((prev) => [...prev, userMsg]);
+    setInputText('');
+    setIsTyping(true);
+
+    try {
+      const history = messages
+        .filter((m) => m.id !== 'init' && !m.id.startsWith('loading_'))
+        .map((m) => ({
+          role: m.role === 'user' ? 'user' : 'model',
+          text: m.text,
+        }));
+
+      const res = await window.electronAPI?.sendChatMessage?.({
+        history,
+        message: text,
+        contextText: screenContext,
+      });
+
+      if (res?.success && res.reply) {
+        const replyText = res.reply;
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `tut_${Date.now()}`,
+            role: 'tutor',
+            text: replyText,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `err_${Date.now()}`,
+            role: 'tutor',
+            text: `සමාවෙන්න, උත්තරය ලබාගැනීමේදී ගැටලුවක් මතු වුණා: ${res?.error || 'Unknown error'}. කරුණාකර නැවත උත්සාහ කරන්න.`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `err_${Date.now()}`,
+          role: 'tutor',
+          text: `Error: ${msg}`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
   const handleAction = (action: string) => {
-    console.log('[FloatingWidget] Action triggered:', action);
     if (action === 'start' || action === 'resume') setState('monitoring');
     if (action === 'pause') setState('paused');
     if (action === 'stop') setState('idle');
-    window.electronAPI?.triggerSessionAction(action);
+    window.electronAPI?.triggerSessionAction?.(action);
   };
 
-  const handleExpand = () => {
-    console.log('[FloatingWidget] Restoring main window');
-    window.electronAPI?.restoreMainWindow();
+  const handleExpandDashboard = () => {
+    window.electronAPI?.restoreMainWindow?.();
   };
 
+  // Compact Mode (Mini Floating Bar)
+  if (!isExpanded) {
+    return (
+      <div className="floating-bar">
+        <div className="floating-drag" onClick={() => state !== 'idle' && toggleExpand(true)}>
+          <span className="drag-handle-grip" title="Drag to reposition">
+            <GripIcon />
+          </span>
+          <span className={`status-indicator status-${state}`} />
+          <span className="floating-label">
+            {state === 'monitoring' ? 'Monitoring' : state === 'paused' ? 'Paused' : 'SLC Idle'}
+          </span>
+        </div>
+
+        <div className="floating-actions">
+          {state === 'idle' && (
+            <button
+              type="button"
+              className="btn btn-primary btn-mini"
+              onClick={() => handleAction('start')}
+            >
+              <PlayIcon /> Start
+            </button>
+          )}
+
+          {state === 'monitoring' && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-mini"
+              onClick={() => handleAction('pause')}
+            >
+              <PauseIcon /> Pause
+            </button>
+          )}
+
+          {state === 'paused' && (
+            <button
+              type="button"
+              className="btn btn-primary btn-mini"
+              onClick={() => handleAction('resume')}
+            >
+              <PlayIcon /> Resume
+            </button>
+          )}
+
+          {/* Quick Help Button */}
+          <button
+            type="button"
+            className="btn btn-mini btn-quick-help"
+            title={state === 'idle' ? 'Start a study session first to enable Quick Help' : 'Capture screen and generate explanation'}
+            disabled={state === 'idle'}
+            onClick={handleQuickHelp}
+          >
+            <HelpCircleIcon /> Help
+          </button>
+
+          {/* Chat Drawer Button */}
+          <button
+            type="button"
+            className="btn btn-mini btn-chat-toggle"
+            title={state === 'idle' ? 'Start a study session first to enable Chat' : 'Open AI Tutor Assistant'}
+            disabled={state === 'idle'}
+            onClick={() => toggleExpand(true)}
+          >
+            <MessageSquareIcon /> Chat
+          </button>
+
+          {state !== 'idle' && (
+            <button
+              type="button"
+              className="btn btn-danger btn-mini"
+              onClick={() => handleAction('stop')}
+            >
+              <StopIcon /> Stop
+            </button>
+          )}
+
+          <button
+            type="button"
+            className="btn btn-ghost btn-mini"
+            title="Expand dashboard"
+            onClick={handleExpandDashboard}
+          >
+            <ExpandIcon />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Expanded Mode (Side Overlay AI Tutor Chat)
   return (
-    <div className="floating-bar">
-      <div className="floating-drag">
-        <span className={`status-indicator status-${state}`} />
-        <span className="floating-label">
-          {state === 'monitoring' ? 'Monitoring' : state === 'paused' ? 'Paused' : 'SLC · Idle'}
-        </span>
+    <div className="overlay-chat-container">
+      {/* Draggable Header */}
+      <div className="overlay-chat-header">
+        <div className="overlay-chat-title">
+          <span className="drag-handle-grip" title="Drag to reposition">
+            <GripIcon />
+          </span>
+          <SparklesIcon />
+          <span>AI Tutor Assistant</span>
+          <span className={`status-indicator status-${state}`} style={{ width: 6, height: 6 }} />
+        </div>
+        <div className="overlay-chat-header-actions">
+          <button
+            type="button"
+            className="chat-header-btn"
+            title="Capture New Screen & Refresh Context"
+            disabled={isAnalyzing || state === 'idle'}
+            onClick={handleQuickHelp}
+          >
+            <CameraIcon />
+          </button>
+          <button
+            type="button"
+            className="chat-header-btn"
+            title="Expand Full Dashboard"
+            onClick={handleExpandDashboard}
+          >
+            <ExpandIcon />
+          </button>
+          <button
+            type="button"
+            className="chat-header-btn"
+            title="Collapse to Mini Bar"
+            onClick={() => toggleExpand(false)}
+          >
+            <CloseIcon />
+          </button>
+        </div>
       </div>
 
-      <div className="floating-actions">
-        {state === 'idle' && (
-          <button
-            type="button"
-            className="btn btn-primary btn-mini"
-            onClick={() => handleAction('start')}
-          >
-            <PlayIcon /> Start
-          </button>
+      {/* Messages Scroll Area */}
+      <div className="overlay-chat-messages">
+        {messages.map((msg) => (
+          <div key={msg.id} className={`chat-bubble-row ${msg.role === 'user' ? 'user-row' : 'tutor-row'}`}>
+            <div className={`chat-bubble ${msg.role === 'user' ? 'user-bubble' : 'tutor-bubble'}`}>
+              <div className="chat-bubble-text">{msg.text}</div>
+              <div className="chat-bubble-time">{msg.timestamp}</div>
+            </div>
+          </div>
+        ))}
+        {(isTyping || isAnalyzing) && (
+          <div className="chat-bubble-row tutor-row">
+            <div className="chat-bubble tutor-bubble typing-bubble">
+              <span className="dot" />
+              <span className="dot" />
+              <span className="dot" />
+              <span className="typing-label">
+                {isAnalyzing ? 'Analyzing current screen...' : 'Tutor is thinking...'}
+              </span>
+            </div>
+          </div>
         )}
+        <div ref={messagesEndRef} />
+      </div>
 
-        {state === 'monitoring' && (
-          <button
-            type="button"
-            className="btn btn-secondary btn-mini"
-            onClick={() => handleAction('pause')}
-          >
-            <PauseIcon /> Pause
-          </button>
-        )}
-
-        {state === 'paused' && (
-          <button
-            type="button"
-            className="btn btn-primary btn-mini"
-            onClick={() => handleAction('resume')}
-          >
-            <PlayIcon /> Resume
-          </button>
-        )}
-
-        {state === 'monitoring' && (
-          <button
-            type="button"
-            className="btn btn-mini btn-help"
-            style={{ padding: '2px 8px', fontSize: '11px' }}
-            title="Request Quick Help"
-            onClick={() => {
-              window.electronAPI?.triggerHelpNow?.();
-              handleExpand();
-            }}
-          >
-            <SparklesIcon /> Help
-          </button>
-        )}
-
-        {state !== 'idle' && (
-          <button
-            type="button"
-            className="btn btn-danger btn-mini"
-            onClick={() => handleAction('stop')}
-          >
-            <StopIcon /> Stop
-          </button>
-        )}
-
-        <button
-          type="button"
-          className="btn btn-ghost btn-mini"
-          title="Expand dashboard"
-          onClick={handleExpand}
-        >
-          <ExpandIcon />
+      {/* Quick Suggestions Chips */}
+      <div className="overlay-quick-chips">
+        <button type="button" onClick={() => handleSendMessage('මේක තව සරලව උදාහරණයකින් පැහැදිලි කරන්න.')}>
+          සරල උදාහරණයක්
+        </button>
+        <button type="button" onClick={() => handleSendMessage('මේ code එකේ ප්‍රධාන steps මොනවාද?')}>
+          ප්‍රධාන Steps
+        </button>
+        <button type="button" onClick={() => handleSendMessage('Explain this in English please.')}>
+          In English
         </button>
       </div>
+
+      {/* Input Box */}
+      <form
+        className="overlay-chat-input-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleSendMessage();
+        }}
+      >
+        <input
+          type="text"
+          className="overlay-chat-input"
+          placeholder="Ask AI Tutor in Sinhala or English..."
+          value={inputText}
+          onChange={(e) => setInputText(e.target.value)}
+          disabled={isTyping || isAnalyzing}
+        />
+        <button
+          type="submit"
+          className="overlay-chat-send-btn"
+          disabled={!inputText.trim() || isTyping || isAnalyzing}
+          title="Send"
+        >
+          <SendIcon />
+        </button>
+      </form>
     </div>
   );
 }
 
-// ─── 🛡️ Privacy Consent Modal Component ──────────────────────────────────────
+// ─── Privacy Consent Modal Component ──────────────────────────────────────────
 interface ConsentModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -601,8 +917,22 @@ function Dashboard() {
       if (window.electronAPI?.sendFrameContext) {
         try {
           const buffer = await blob.arrayBuffer();
-          const dispatchRes = await window.electronAPI.sendFrameContext(buffer, reqId);
+          const dispatchRes = await window.electronAPI.sendFrameContext(buffer, reqId, true);
           backendDispatched = dispatchRes?.success ?? false;
+
+          // If explanation is returned directly via HTTP response
+          if (dispatchRes?.data?.text) {
+            const expData = dispatchRes.data;
+            console.log('[Direct HTTP Explanation Result]', expData);
+            window.electronAPI?.logExplanation?.(expData);
+            setActiveExplanation({
+              requestId: expData.requestId || reqId,
+              text: expData.text,
+              language: expData.language || 'si',
+              timestamp: new Date().toLocaleTimeString(),
+            });
+            setRequestingHelp(false);
+          }
         } catch (dispatchErr) {
           console.warn('[Capture Pipeline] Backend dispatch failed:', dispatchErr);
         }
@@ -639,10 +969,20 @@ function Dashboard() {
     handleCaptureFrameRef.current = handleCaptureFrame;
   }, [handleCaptureFrame]);
 
-  // ─── ⚡ SignalR Hub Connection Lifecycle ────────────────────────────────────
+  // Listen for capture requests from the floating side-overlay chat
+  useEffect(() => {
+    const unsub = window.electronAPI?.onRequestScreenCapture?.(() => {
+      console.log('[Dashboard] Screen capture requested from floating overlay');
+      handleCaptureFrame();
+    });
+    return () => unsub?.();
+  }, [handleCaptureFrame]);
+
+  // ─── SignalR Hub Connection Lifecycle ──────────────────────────────────────
   useEffect(() => {
     let hubConnection: signalR.HubConnection | null = null;
     let isMounted = true;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
     async function initSignalR() {
       try {
@@ -656,6 +996,9 @@ function Dashboard() {
         const connection = new signalR.HubConnectionBuilder()
           .withUrl(hubUrl, {
             accessTokenFactory: () => config.token,
+            skipNegotiation: true,
+            transport: signalR.HttpTransportType.WebSockets,
+            withCredentials: false,
           })
           .withAutomaticReconnect([0, 2000, 5000, 10000])
           .configureLogging(signalR.LogLevel.Warning)
@@ -690,6 +1033,7 @@ function Dashboard() {
         connection.on('explanation', (data: { requestId: string; text: string; language: string }) => {
           if (!isMounted) return;
           console.log('[SignalR Explanation Event]', data);
+          window.electronAPI?.logExplanation?.(data);
           setActiveExplanation({
             requestId: data.requestId,
             text: data.text,
@@ -703,15 +1047,30 @@ function Dashboard() {
           if (isMounted) setSignalRConnected(true);
         });
         connection.onclose(() => {
-          if (isMounted) setSignalRConnected(false);
+          if (isMounted) {
+            setSignalRConnected(false);
+            retryTimer = setTimeout(() => tryConnect(connection), 2000);
+          }
         });
 
-        await connection.start();
-        if (isMounted) {
-          setSignalRConnected(true);
-          hubConnection = connection;
-          console.log('[SignalR] Connected successfully to Orchestrator Hub.');
+        async function tryConnect(conn: signalR.HubConnection) {
+          if (!isMounted) return;
+          try {
+            await conn.start();
+            if (isMounted) {
+              setSignalRConnected(true);
+              hubConnection = conn;
+              console.log('[SignalR] Connected successfully to Orchestrator Hub.');
+            }
+          } catch (connErr) {
+            if (!isMounted) return;
+            console.warn('[SignalR Connection] Hub not ready yet, retrying in 2s...', connErr);
+            setSignalRConnected(false);
+            retryTimer = setTimeout(() => tryConnect(conn), 2000);
+          }
         }
+
+        await tryConnect(connection);
       } catch (err) {
         console.warn('[SignalR Connection] Hub unavailable or initializing:', err);
         if (isMounted) setSignalRConnected(false);
@@ -722,6 +1081,7 @@ function Dashboard() {
 
     return () => {
       isMounted = false;
+      if (retryTimer) clearTimeout(retryTimer);
       hubConnection?.stop();
     };
   }, []);
@@ -854,7 +1214,7 @@ function Dashboard() {
 
       {/* Main Workspace */}
       <main className="content">
-        {/* ─── 🔔 Soft-Alert Banner (Contextual Confusion Nudge) ─── */}
+        {/* Soft-Alert Banner (Contextual Confusion Nudge) */}
         {activeAlert && (
           <div className="soft-alert-banner" role="alert">
             <div className="soft-alert-left">
@@ -890,7 +1250,7 @@ function Dashboard() {
           </div>
         )}
 
-        {/* ─── 💡 AI Tutor Contextual Explanation Card ─── */}
+        {/* AI Tutor Contextual Explanation Card */}
         {activeExplanation && (
           <div className="explanation-panel">
             <div className="explanation-header">
@@ -921,7 +1281,7 @@ function Dashboard() {
                   onClick={() => setActiveExplanation(null)}
                   title="Dismiss explanation"
                 >
-                  ✕
+                  <CloseIcon />
                 </button>
               </div>
             </div>
@@ -1046,7 +1406,7 @@ function Dashboard() {
                     <th>Backend Pipeline</th>
                     <td>
                       {lastCapture.backendDispatched
-                        ? '✅ 202 Accepted (POST /context/frame)'
+                        ? '202 Accepted (POST /context/frame)'
                         : 'Local in-memory preview'}
                     </td>
                   </tr>

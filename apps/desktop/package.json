@@ -5,6 +5,7 @@
   "type": "module",
   "main": "main.js",
   "scripts": {
+    "start": "node start.js",
     "dev": "vite",
     "dev:electron": "electron .",
     "build": "tsc -b && vite build",
