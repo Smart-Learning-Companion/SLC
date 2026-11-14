@@ -26,6 +26,24 @@ function loadDevEnv() {
     } catch { /* ignore */ }
   }
 
+  const devEnv = path.join(home, '.config', 'slc', 'dev.env');
+  if (fs.existsSync(devEnv)) {
+    try {
+      const content = fs.readFileSync(devEnv, 'utf8');
+      const lines = content.split(/\r?\n/);
+      for (const line of lines) {
+        const match = line.match(/^(?:export\s+)?([A-Za-z0-9_]+)\s*=\s*['"]?([^'"]+)['"]?/);
+        if (match) {
+          const [, key, val] = match;
+          if (!process.env[key]) {
+            process.env[key] = val.trim();
+          }
+        }
+      }
+      console.log('[SLC Desktop Runner] Loaded configuration from dev.env');
+    } catch { /* ignore */ }
+  }
+
   // Ensure default models are set (gemini-3.5-flash-lite is active and tested)
   if (!process.env.SLC_GEMINI_MODEL || process.env.SLC_GEMINI_MODEL.includes('2.5')) {
     process.env.SLC_GEMINI_MODEL = 'gemini-3.5-flash-lite';

@@ -213,20 +213,28 @@ function createFloatingWidget() {
   savedMiniBounds = { x: initialX, y: initialY };
   isWidgetExpanded = false;
 
+  const isLinux = process.platform === 'linux';
+
   floatingWidget = new BrowserWindow({
+    title: 'SLC Floating Widget',
     width: widgetWidth,
     height: widgetHeight,
+    minWidth: widgetWidth,
+    maxWidth: widgetWidth,
+    minHeight: widgetHeight,
+    maxHeight: widgetHeight,
     x: initialX,
     y: initialY,
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
     alwaysOnTop: true,
-    resizable: true,
+    resizable: false,
     skipTaskbar: true,
     hasShadow: false,
     show: false,
     roundedCorners: true,
+    ...(isLinux ? { type: 'toolbar' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -235,7 +243,7 @@ function createFloatingWidget() {
   });
 
   floatingWidget.setBackgroundColor('#00000000');
-  floatingWidget.setAlwaysOnTop(true, 'floating');
+  floatingWidget.setAlwaysOnTop(true, 'screen-saver');
   try {
     floatingWidget.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   } catch { /* platform specific */ }
@@ -278,7 +286,10 @@ function showFloatingWidget() {
     createFloatingWidget();
   }
   floatingWidget?.show();
-  floatingWidget?.setAlwaysOnTop(true, 'floating');
+  floatingWidget?.setAlwaysOnTop(true, 'screen-saver');
+  try {
+    floatingWidget?.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  } catch { /* platform specific */ }
   floatingWidget?.webContents.send('sync-session-state', currentSessionState);
 }
 
@@ -423,7 +434,10 @@ ipcMain.on('log-explanation', (_event, data) => {
 
   if (floatingWidget && !floatingWidget.isDestroyed()) {
     floatingWidget.show();
-    floatingWidget.setAlwaysOnTop(true, 'floating');
+    floatingWidget.setAlwaysOnTop(true, 'screen-saver');
+    try {
+      floatingWidget.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    } catch { /* platform specific */ }
     floatingWidget.webContents.send('new-explanation', data);
   }
 });
@@ -460,13 +474,20 @@ ipcMain.on('resize-widget', (_event, expanded) => {
 
     expandedInitialBounds = { x: Math.round(x), y: Math.round(y) };
 
+    floatingWidget.setResizable(true);
+    floatingWidget.setMinimumSize(chatWidth, 300);
+    floatingWidget.setMaximumSize(chatWidth, Math.min(800, screenHeight - 20));
+
     floatingWidget.setBounds({
       x: expandedInitialBounds.x,
       y: expandedInitialBounds.y,
       width: chatWidth,
       height: chatHeight,
     });
-    floatingWidget.setAlwaysOnTop(true, 'floating');
+    floatingWidget.setAlwaysOnTop(true, 'screen-saver');
+    try {
+      floatingWidget.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    } catch { /* platform specific */ }
   } else {
     isWidgetExpanded = false;
     let targetX;
@@ -501,13 +522,20 @@ ipcMain.on('resize-widget', (_event, expanded) => {
 
     savedMiniBounds = { x: Math.round(targetX), y: Math.round(targetY) };
 
+    floatingWidget.setMinimumSize(widgetWidth, widgetHeight);
+    floatingWidget.setMaximumSize(widgetWidth, widgetHeight);
+    floatingWidget.setResizable(false);
+
     floatingWidget.setBounds({
       x: savedMiniBounds.x,
       y: savedMiniBounds.y,
       width: widgetWidth,
       height: widgetHeight,
     });
-    floatingWidget.setAlwaysOnTop(true, 'floating');
+    floatingWidget.setAlwaysOnTop(true, 'screen-saver');
+    try {
+      floatingWidget.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    } catch { /* platform specific */ }
   }
 });
 
