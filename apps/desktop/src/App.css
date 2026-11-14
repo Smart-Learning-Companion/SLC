@@ -5,7 +5,9 @@
   min-height: 100vh;
   background-color: #0e1117;
   color: #e6edf3;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica,
+    Arial, sans-serif;
   font-size: 13px;
   line-height: 1.5;
 }
@@ -15,8 +17,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 48px;
-  padding: 0 20px;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  min-height: 48px;
+  box-sizing: border-box;
+  padding: 6px 20px;
   background-color: #161b22;
   border-bottom: 1px solid #30363d;
 }
@@ -41,7 +46,8 @@
   padding: 2px 8px;
   border-radius: 4px;
   border: 1px solid #30363d;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
 .system-status {
@@ -108,7 +114,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 12px 16px;
 }
 
 .panel-title {
@@ -127,6 +134,7 @@
 /* Buttons */
 .action-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -138,7 +146,9 @@
   font-weight: 500;
   cursor: pointer;
   border: 1px solid transparent;
-  transition: background-color 0.15s, border-color 0.15s;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -223,6 +233,8 @@
 
 .meta-table {
   width: 100%;
+  table-layout: fixed;
+  overflow-wrap: anywhere;
   border-collapse: collapse;
   font-size: 12px;
   border: 1px solid #30363d;
@@ -244,7 +256,8 @@
 .meta-table td {
   padding: 8px 12px;
   color: #c9d1d9;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   border-bottom: 1px solid #30363d;
   border-right: 1px solid #30363d;
 }
@@ -286,16 +299,19 @@
 
 /* Footer */
 .footer {
-  height: 32px;
-  padding: 0 20px;
+  min-height: 32px;
+  padding: 4px 20px;
   display: flex;
+  flex-wrap: wrap;
+  gap: 2px 16px;
   align-items: center;
   justify-content: space-between;
   border-top: 1px solid #30363d;
   background-color: #161b22;
   font-size: 11px;
   color: #8b949e;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
 /* Floating Mini Overlay Controller */
@@ -350,22 +366,33 @@
   transition: all 0.15s ease;
 }
 
-/* Frameless Floating Mini Bar */
+/* Floating views: transparent page, no scrollbars, window sized by the content */
+html.view-floating,
+html.view-floating body,
+html.view-floating #root {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Frameless Floating Mini Bar.
+   width: max-content gives the bar its natural width; the renderer reports it
+   (fitWidget) and the main process resizes the window to match, so nothing is
+   clipped no matter which buttons are visible or how long the label is. */
 .floating-bar {
-  position: fixed;
-  inset: 0;
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  height: 100%;
+  justify-content: flex-start;
+  width: max-content;
+  height: 44px;
   box-sizing: border-box;
   padding: 0 10px 0 8px;
   background-color: rgba(18, 22, 28, 0.78);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 8px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.04);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica,
+    Arial, sans-serif;
   user-select: none;
   overflow: hidden;
   -webkit-app-region: drag;
@@ -387,7 +414,7 @@
 }
 
 .floating-drag {
-  flex: 1;
+  flex: 0 1 auto;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -403,6 +430,22 @@
   color: #c9d1d9;
   letter-spacing: -0.1px;
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Fallback if the compositor forces the window narrower than the content:
+   drop the text and keep the icons so every control stays reachable. */
+@media (max-width: 340px) {
+  .floating-bar .btn-text,
+  .floating-bar .floating-label {
+    display: none;
+  }
+
+  .floating-actions {
+    margin-left: 6px;
+  }
 }
 
 .floating-actions {
@@ -411,6 +454,8 @@
   gap: 5px;
   position: relative;
   z-index: 10;
+  flex: 0 0 auto;
+  margin-left: 12px;
   -webkit-app-region: no-drag !important;
 }
 
@@ -418,6 +463,7 @@
 .floating-actions button,
 .floating-actions .btn {
   -webkit-app-region: no-drag !important;
+  flex-shrink: 0;
   cursor: pointer !important;
 }
 
@@ -459,8 +505,12 @@
 }
 
 @keyframes fadeInModal {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .modal-card {
@@ -469,7 +519,9 @@
   border-radius: 8px;
   max-width: 520px;
   width: 100%;
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  box-shadow:
+    0 16px 36px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.05);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -477,8 +529,14 @@
 }
 
 @keyframes scaleUpModal {
-  from { transform: scale(0.97); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
+  from {
+    transform: scale(0.97);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .modal-header {
@@ -588,7 +646,9 @@
   border: 1px solid rgba(56, 139, 253, 0.2);
   border-radius: 6px;
   cursor: pointer;
-  transition: background-color 0.15s, border-color 0.15s;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
 }
 
 .consent-checkbox-row:hover {
@@ -656,9 +716,14 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 12px 16px;
   padding: 12px 18px;
-  background: linear-gradient(90deg, rgba(210, 153, 34, 0.15) 0%, rgba(22, 27, 34, 0.95) 100%);
+  background: linear-gradient(
+    90deg,
+    rgba(210, 153, 34, 0.15) 0%,
+    rgba(22, 27, 34, 0.95) 100%
+  );
   border: 1px solid #d29922;
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(210, 153, 34, 0.12);
@@ -696,7 +761,8 @@
 }
 
 @keyframes pulseAmber {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow: 0 0 0 0 rgba(210, 153, 34, 0.4);
   }
   50% {
@@ -789,6 +855,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-bottom: 14px;
   padding-bottom: 12px;
   border-bottom: 1px solid #21262d;
@@ -867,7 +935,8 @@
 }
 
 .explanation-req-badge {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
 /* Quick Help Button in Dashboard */
@@ -906,12 +975,19 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  background-color: rgba(14, 18, 24, 0.70);
+  /* The window is transparent, so keep enough opacity to stay readable even
+     when the compositor has blur disabled. */
+  background-color: rgba(14, 18, 24, 0.88);
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 12px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.06);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.65),
+    0 0 0 1px rgba(255, 255, 255, 0.06);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica,
+    Arial, sans-serif;
   overflow: hidden;
+  min-height: 0;
   user-select: text;
   -webkit-app-region: no-drag;
 }
@@ -987,6 +1063,9 @@
   font-size: 13px;
   font-weight: 600;
   color: #f0f6fc;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .overlay-chat-title svg {
@@ -1005,6 +1084,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 .chat-header-btn {
@@ -1035,6 +1115,8 @@
 
 .overlay-chat-messages {
   flex: 1;
+  min-height: 0;
+  flex-shrink: 1;
   overflow-y: auto;
   padding: 14px 12px;
   display: flex;
@@ -1074,7 +1156,7 @@
 }
 
 .tutor-bubble {
-  background-color: rgba(22, 27, 34, 0.80);
+  background-color: rgba(22, 27, 34, 0.8);
   color: #e6edf3;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-bottom-left-radius: 3px;
@@ -1116,12 +1198,24 @@
   animation: bounceDot 1.4s infinite ease-in-out both;
 }
 
-.typing-bubble .dot:nth-child(1) { animation-delay: -0.32s; }
-.typing-bubble .dot:nth-child(2) { animation-delay: -0.16s; }
+.typing-bubble .dot:nth-child(1) {
+  animation-delay: -0.32s;
+}
+.typing-bubble .dot:nth-child(2) {
+  animation-delay: -0.16s;
+}
 
 @keyframes bounceDot {
-  0%, 80%, 100% { transform: scale(0); opacity: 0.4; }
-  40% { transform: scale(1); opacity: 1; }
+  0%,
+  80%,
+  100% {
+    transform: scale(0);
+    opacity: 0.4;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .typing-label {
@@ -1144,6 +1238,7 @@
   background-color: rgba(13, 17, 23, 0.65);
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   scrollbar-width: none;
+  flex: 0 0 auto;
 }
 
 .overlay-quick-chips::-webkit-scrollbar {
@@ -1185,6 +1280,7 @@
   padding: 10px 12px;
   background-color: rgba(13, 17, 23, 0.75);
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+  flex: 0 0 auto;
 }
 
 .overlay-chat-input {
@@ -1234,6 +1330,3 @@
   cursor: not-allowed;
   transform: none;
 }
-
-
-

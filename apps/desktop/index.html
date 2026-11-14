@@ -4,7 +4,15 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>desktop</title>
+    <title>SLC Dashboard</title>
+    <script>
+      const view = new URLSearchParams(window.location.search);
+      document.title = view.get('mode') === 'chat'
+        ? 'SLC Chat Overlay'
+        : view.get('view') === 'floating'
+          ? 'SLC Floating Widget'
+          : 'SLC Dashboard';
+    </script>
   </head>
   <body>
     <div id="root"></div>
