@@ -31,8 +31,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   minimizeToWidget: () => ipcRenderer.send('minimize-to-widget'),
 
   // Context: dispatch captured frame to .NET /context/frame endpoint
-  sendFrameContext: (frameBuffer, requestId) =>
-    ipcRenderer.invoke('send-frame-context', { frameBuffer, requestId }),
+  sendFrameContext: (frameBuffer, requestId, wait) =>
+    ipcRenderer.invoke('send-frame-context', { frameBuffer, requestId, wait }),
 
   // Configuration: retrieve backend port and session token for SignalR
   getBackendConfig: () => ipcRenderer.invoke('get-backend-config'),
@@ -43,5 +43,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Help Now: trigger manual quick-help request to .NET orchestrator
   triggerHelpNow: () => ipcRenderer.invoke('trigger-help-now'),
+
+  // Diagnostic: Log explanation to terminal
+  logExplanation: (data) => ipcRenderer.send('log-explanation', data),
+
+  // 💬 Floating Side Overlay Chat Controls
+  resizeWidget: (expanded) => ipcRenderer.send('resize-widget', expanded),
+  onNewExplanation: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on('new-explanation', listener);
+    return () => ipcRenderer.removeListener('new-explanation', listener);
+  },
+  sendChatMessage: (data) => ipcRenderer.invoke('send-chat-message', data),
+  requestScreenCapture: () => ipcRenderer.send('request-screen-capture'),
+  onRequestScreenCapture: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('request-screen-capture', listener);
+    return () => ipcRenderer.removeListener('request-screen-capture', listener);
+  },
 });
 

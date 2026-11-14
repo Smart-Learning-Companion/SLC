@@ -19,7 +19,7 @@
   letter-spacing: 0.18px;
   color-scheme: light dark;
   color: var(--text);
-  background: var(--bg);
+  background: transparent !important;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -28,6 +28,15 @@
   @media (max-width: 1024px) {
     font-size: 16px;
   }
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent !important;
+  background-color: transparent !important;
+  overflow-x: hidden;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -57,11 +66,7 @@
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  overflow-x: hidden;
+  background: transparent !important;
 }
 
 h1,
