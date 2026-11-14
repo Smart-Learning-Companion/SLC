@@ -7,11 +7,12 @@
     <title>SLC Dashboard</title>
     <script>
       const view = new URLSearchParams(window.location.search);
-      document.title = view.get('mode') === 'chat'
-        ? 'SLC Chat Overlay'
-        : view.get('view') === 'floating'
-          ? 'SLC Floating Widget'
-          : 'SLC Dashboard';
+      document.title =
+        view.get("mode") === "chat"
+          ? "SLC Chat Overlay"
+          : view.get("view") === "floating"
+            ? "SLC Floating Widget"
+            : "SLC Dashboard";
     </script>
   </head>
   <body>
