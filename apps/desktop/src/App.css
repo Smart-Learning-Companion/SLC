@@ -1228,7 +1228,7 @@ html.view-floating #root {
 
 /* Markdown Content Styling */
 .chat-markdown-content {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Sinhala", "Iskoola Pota", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Nirmala UI", Roboto, "Noto Sans Sinhala", "Iskoola Pota", sans-serif;
   font-size: 13.5px;
   line-height: 1.68;
   color: inherit;

@@ -508,6 +508,18 @@ const markedParser = new Marked({
   },
 });
 
+function sanitizeSinhalaUnicode(text: string): string {
+  // Normalize to Unicode Canonical Composition (NFC)
+  let normalized = text.normalize("NFC");
+  // Clean standalone Sinhala combining marks that appear without a base consonant
+  // (e.g. immediately after whitespace, punctuation, or at start of string)
+  normalized = normalized.replace(
+    /(^|[\s\p{P}])[\u0D81\u0D82\u0D83\u0DCA-\u0DDF\u0DF2\u0DF3]+/gu,
+    "$1"
+  );
+  return normalized;
+}
+
 interface MarkdownMessageProps {
   content: string;
   isUser?: boolean;
@@ -533,7 +545,8 @@ function MarkdownMessage({ content, isUser }: MarkdownMessageProps) {
 
   const sanitizedHtml = useMemo(() => {
     try {
-      const parsed = markedParser.parse(body);
+      const cleanBody = sanitizeSinhalaUnicode(body);
+      const parsed = markedParser.parse(cleanBody);
       const rawHtml = typeof parsed === "string" ? parsed : "";
       return DOMPurify.sanitize(rawHtml, {
         ADD_ATTR: [
