@@ -1167,6 +1167,329 @@ html.view-floating #root {
   white-space: pre-wrap;
 }
 
+/* Screen Analysis Header Badge */
+.screen-analysis-badge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  padding: 3px 9px;
+  margin-bottom: 8px;
+  background: rgba(56, 139, 253, 0.14);
+  border: 1px solid rgba(56, 139, 253, 0.35);
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #79c0ff;
+  letter-spacing: 0.2px;
+  user-select: none;
+}
+
+.badge-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #3fb950;
+  display: inline-block;
+  box-shadow: 0 0 6px #3fb950;
+  animation: analysisGlow 2s infinite ease-out;
+}
+
+@keyframes analysisGlow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 5px rgba(63, 185, 80, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(63, 185, 80, 0);
+  }
+}
+
+.badge-icon {
+  stroke: #79c0ff;
+  flex-shrink: 0;
+}
+
+.badge-title {
+  color: #e6edf3;
+}
+
+.badge-sep {
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 10px;
+}
+
+.badge-lang {
+  color: #58a6ff;
+  font-weight: 700;
+}
+
+/* Markdown Content Styling */
+.chat-markdown-content {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Sinhala", "Iskoola Pota", sans-serif;
+  font-size: 13.5px;
+  line-height: 1.68;
+  color: inherit;
+  word-break: break-word;
+}
+
+.chat-markdown-content p {
+  margin: 0 0 10px 0;
+}
+
+.chat-markdown-content p:last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown-content strong,
+.chat-markdown-content b {
+  font-weight: 650;
+  color: #ffffff;
+}
+
+.user-bubble .chat-markdown-content strong,
+.user-bubble .chat-markdown-content b {
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.chat-markdown-content em,
+.chat-markdown-content i {
+  font-style: italic;
+  color: #d2a8ff;
+}
+
+.user-bubble .chat-markdown-content em,
+.user-bubble .chat-markdown-content i {
+  color: #e6edf3;
+}
+
+.chat-markdown-content h1,
+.chat-markdown-content h2,
+.chat-markdown-content h3,
+.chat-markdown-content h4 {
+  margin: 12px 0 6px 0;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #58a6ff;
+}
+
+.chat-markdown-content h1 {
+  font-size: 1.25rem;
+}
+
+.chat-markdown-content h2 {
+  font-size: 1.15rem;
+}
+
+.chat-markdown-content h3 {
+  font-size: 1.05rem;
+  color: #79c0ff;
+}
+
+.chat-markdown-content h4 {
+  font-size: 0.98rem;
+  color: #79c0ff;
+}
+
+.chat-markdown-content ul,
+.chat-markdown-content ol {
+  margin: 6px 0 10px 0;
+  padding-left: 20px;
+}
+
+.chat-markdown-content ul {
+  list-style-type: disc;
+}
+
+.chat-markdown-content ol {
+  list-style-type: decimal;
+}
+
+.chat-markdown-content li {
+  margin: 4px 0;
+  line-height: 1.6;
+}
+
+.chat-markdown-content li::marker {
+  color: #58a6ff;
+}
+
+.user-bubble .chat-markdown-content li::marker {
+  color: #ffffff;
+}
+
+.chat-markdown-content li > ul,
+.chat-markdown-content li > ol {
+  margin: 3px 0;
+  padding-left: 18px;
+}
+
+.chat-markdown-content blockquote {
+  border-left: 3px solid #388bfd;
+  background: rgba(56, 139, 253, 0.09);
+  margin: 8px 0;
+  padding: 6px 12px;
+  border-radius: 0 6px 6px 0;
+  color: #a5d6ff;
+}
+
+.chat-markdown-content blockquote p {
+  margin-bottom: 4px;
+}
+
+.chat-markdown-content blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown-content hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  margin: 10px 0;
+}
+
+/* Inline Code */
+.chat-markdown-content :not(pre) > code {
+  background: rgba(110, 118, 129, 0.28);
+  color: #ff7b72;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.user-bubble .chat-markdown-content :not(pre) > code {
+  background: rgba(0, 0, 0, 0.25);
+  color: #ffffff;
+}
+
+/* Code Box Component */
+.code-box {
+  margin: 10px 0;
+  border-radius: 8px;
+  background: #090d13;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+.code-box-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.code-box-lang {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #58a6ff;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.code-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #8b949e;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  pointer-events: auto !important;
+  -webkit-app-region: no-drag !important;
+  user-select: none;
+}
+
+.code-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #f0f6fc;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.code-copy-btn.copied {
+  background: rgba(46, 160, 67, 0.22);
+  color: #3fb950;
+  border-color: rgba(46, 160, 67, 0.5);
+}
+
+.code-copy-svg {
+  flex-shrink: 0;
+}
+
+.code-box-pre {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #e6edf3;
+  background: transparent;
+  user-select: text !important;
+}
+
+.code-box-pre code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+}
+
+/* Links */
+.chat-markdown-link {
+  color: #58a6ff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.15s ease;
+  pointer-events: auto !important;
+  -webkit-app-region: no-drag !important;
+}
+
+.chat-markdown-link:hover {
+  color: #79c0ff;
+}
+
+.user-bubble .chat-markdown-link {
+  color: #ffffff;
+  text-decoration: underline;
+}
+
+/* Markdown Tables */
+.chat-markdown-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 12px;
+}
+
+.chat-markdown-content th,
+.chat-markdown-content td {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.chat-markdown-content th {
+  background: rgba(255, 255, 255, 0.06);
+  font-weight: 600;
+  color: #58a6ff;
+}
+
+.chat-markdown-content tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.02);
+}
+
 .chat-bubble-time {
   font-size: 10px;
   color: #8b949e;

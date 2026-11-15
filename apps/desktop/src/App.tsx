@@ -1,5 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import * as signalR from "@microsoft/signalr";
+import { Marked } from "marked";
+import DOMPurify from "dompurify";
 import "./App.css";
 
 declare global {
@@ -445,6 +447,192 @@ interface ChatMessage {
   timestamp: string;
 }
 
+// ─── Markdown Parser & Renderer Setup ──────────────────────────────────────────
+function fallbackCopy(text: string): boolean {
+  try {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.left = "-999999px";
+    textArea.style.top = "-999999px";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    const successful = document.execCommand("copy");
+    document.body.removeChild(textArea);
+    return successful;
+  } catch (err) {
+    console.error("[Markdown] Fallback copy failed:", err);
+    return false;
+  }
+}
+
+function copyToClipboard(text: string): Promise<boolean> {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard
+      .writeText(text)
+      .then(() => true)
+      .catch(() => fallbackCopy(text));
+  }
+  return Promise.resolve(fallbackCopy(text));
+}
+
+const markedParser = new Marked({
+  gfm: true,
+  breaks: true,
+  renderer: {
+    code({ text, lang }: { text: string; lang?: string }): string {
+      const code = text || "";
+      const language = (lang || "code").toLowerCase();
+      const displayLang = (lang || "code").toUpperCase();
+      const escaped = code
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+      const encoded = encodeURIComponent(code);
+      return `<div class="code-box">
+        <div class="code-box-header">
+          <span class="code-box-lang">${displayLang}</span>
+          <button type="button" class="code-copy-btn" data-code="${encoded}" title="Copy code">
+            <svg class="code-copy-svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+            <span class="copy-label">Copy</span>
+          </button>
+        </div>
+        <pre class="code-box-pre"><code class="language-${language}">${escaped}</code></pre>
+      </div>`;
+    },
+    link({ href, title, text }: { href: string; title?: string | null; text: string }): string {
+      const titleAttr = title ? ` title="${title}"` : "";
+      return `<a href="${href}" target="_blank" rel="noopener noreferrer"${titleAttr} class="chat-markdown-link">${text}</a>`;
+    },
+  },
+});
+
+interface MarkdownMessageProps {
+  content: string;
+  isUser?: boolean;
+}
+
+function MarkdownMessage({ content, isUser }: MarkdownMessageProps) {
+  const { header, body } = useMemo(() => {
+    if (isUser) {
+      return { header: null, body: content };
+    }
+    const match = content.match(/^\[Screen Analysis(?:\s*-\s*([^\]]+))?\]\s*\n*/i);
+    if (match) {
+      return {
+        header: {
+          title: "Screen Analysis",
+          language: match[1]?.trim() || null,
+        },
+        body: content.slice(match[0].length),
+      };
+    }
+    return { header: null, body: content };
+  }, [content, isUser]);
+
+  const sanitizedHtml = useMemo(() => {
+    try {
+      const parsed = markedParser.parse(body);
+      const rawHtml = typeof parsed === "string" ? parsed : "";
+      return DOMPurify.sanitize(rawHtml, {
+        ADD_ATTR: [
+          "target",
+          "rel",
+          "data-code",
+          "viewBox",
+          "stroke",
+          "stroke-width",
+          "stroke-linecap",
+          "stroke-linejoin",
+          "fill",
+          "class",
+          "title",
+        ],
+        ADD_TAGS: ["svg", "path", "rect", "span", "button", "div", "pre", "code"],
+        ALLOW_DATA_ATTR: true,
+      });
+    } catch (err) {
+      console.error("[MarkdownMessage] Parse error:", err);
+      return body;
+    }
+  }, [body]);
+
+  const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+
+    // Handle code copy button
+    const copyBtn = target.closest<HTMLButtonElement>(".code-copy-btn");
+    if (copyBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const encoded = copyBtn.getAttribute("data-code");
+      if (encoded) {
+        const code = decodeURIComponent(encoded);
+        copyToClipboard(code).then((success) => {
+          if (success) {
+            const label = copyBtn.querySelector(".copy-label");
+            if (label) {
+              const original = label.textContent || "Copy";
+              label.textContent = "Copied!";
+              copyBtn.classList.add("copied");
+              setTimeout(() => {
+                label.textContent = original;
+                copyBtn.classList.remove("copied");
+              }, 2000);
+            }
+          }
+        });
+      }
+      return;
+    }
+
+    // Handle external links safely
+    const link = target.closest<HTMLAnchorElement>("a");
+    if (link && link.href) {
+      e.preventDefault();
+      e.stopPropagation();
+      window.open(link.href, "_blank");
+    }
+  };
+
+  return (
+    <div className="chat-message-wrapper">
+      {header && (
+        <div className="screen-analysis-badge">
+          <span className="badge-pulse" />
+          <svg
+            className="badge-icon"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <span className="badge-title">{header.title}</span>
+          {header.language && (
+            <>
+              <span className="badge-sep">•</span>
+              <span className="badge-lang">{header.language}</span>
+            </>
+          )}
+        </div>
+      )}
+      <div
+        className="chat-markdown-content"
+        onClick={handleContainerClick}
+        dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
+      />
+    </div>
+  );
+}
+
 function FloatingWidget() {
   const [state, setState] = useState<SessionState>("idle");
   const isChatWindow =
@@ -826,7 +1014,7 @@ function FloatingWidget() {
             <div
               className={`chat-bubble ${msg.role === "user" ? "user-bubble" : "tutor-bubble"}`}
             >
-              <div className="chat-bubble-text">{msg.text}</div>
+              <MarkdownMessage content={msg.text} isUser={msg.role === "user"} />
               <div className="chat-bubble-time">{msg.timestamp}</div>
             </div>
           </div>
