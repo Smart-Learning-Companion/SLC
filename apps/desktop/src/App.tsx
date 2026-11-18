@@ -567,7 +567,10 @@ function MarkdownMessage({ content, isUser }: MarkdownMessageProps) {
       });
     } catch (err) {
       console.error("[MarkdownMessage] Parse error:", err);
-      return body;
+      return body
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
     }
   }, [body]);
 
