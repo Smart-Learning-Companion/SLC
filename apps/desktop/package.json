@@ -5,6 +5,7 @@
   "type": "module",
   "main": "main.js",
   "scripts": {
+    "start": "node start.js",
     "dev": "vite",
     "dev:electron": "electron .",
     "build": "tsc -b && vite build",
@@ -13,16 +14,19 @@
   },
   "dependencies": {
     "@microsoft/signalr": "^10.0.11",
+    "dompurify": "^3.4.18",
+    "marked": "^18.2.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/dompurify": "^3.0.5",
     "@types/node": "^24.13.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
-    "electron": "^44.7.0",
+    "electron": "^45.0.0",
     "eslint": "^10.12.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.7",
@@ -32,6 +36,6 @@
     "vite": "^8.3.4"
   },
   "allowScripts": {
-    "electron@41.10.7": true
+    "electron@45.0.0": true
   }
 }

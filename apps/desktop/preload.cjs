@@ -1,47 +1,95 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer } = require("electron");
 
-contextBridge.exposeInMainWorld('electronAPI', {
+contextBridge.exposeInMainWorld("electronAPI", {
   // Main → Floating: push session state changes from dashboard to main process
-  setSessionState: (state) => ipcRenderer.send('session-state-changed', state),
+  setSessionState: (state) => ipcRenderer.send("session-state-changed", state),
 
   // Floating → Any: read current authoritative state stored in main process
-  getCurrentSessionState: () => ipcRenderer.invoke('get-current-session-state'),
+  getCurrentSessionState: () => ipcRenderer.invoke("get-current-session-state"),
 
   // Floating: subscribe to state broadcasts from main process
   onSyncSessionState: (callback) => {
     const listener = (_event, state) => callback(state);
-    ipcRenderer.on('sync-session-state', listener);
-    return () => ipcRenderer.removeListener('sync-session-state', listener);
+    ipcRenderer.on("sync-session-state", listener);
+    return () => ipcRenderer.removeListener("sync-session-state", listener);
   },
 
   // Floating: send action (start / pause / resume / stop) to main process
-  triggerSessionAction: (action) => ipcRenderer.send('trigger-session-action', action),
+  triggerSessionAction: (action) =>
+    ipcRenderer.send("trigger-session-action", action),
 
   // Dashboard: receive forwarded actions from floating widget
   onSessionAction: (callback) => {
     const listener = (_event, action) => callback(action);
-    ipcRenderer.on('session-action', listener);
-    return () => ipcRenderer.removeListener('session-action', listener);
+    ipcRenderer.on("session-action", listener);
+    return () => ipcRenderer.removeListener("session-action", listener);
   },
 
   // Floating → Expand button: bring back main dashboard window
-  restoreMainWindow: () => ipcRenderer.send('restore-main-window'),
+  restoreMainWindow: () => ipcRenderer.send("restore-main-window"),
 
   // Dashboard → Minimize button: hide main window, show floating widget
-  minimizeToWidget: () => ipcRenderer.send('minimize-to-widget'),
+  minimizeToWidget: () => ipcRenderer.send("minimize-to-widget"),
 
   // Context: dispatch captured frame to .NET /context/frame endpoint
-  sendFrameContext: (frameBuffer, requestId) =>
-    ipcRenderer.invoke('send-frame-context', { frameBuffer, requestId }),
+  sendFrameContext: (frameBuffer, requestId, wait) =>
+    ipcRenderer.invoke("send-frame-context", { frameBuffer, requestId, wait }),
 
   // Configuration: retrieve backend port and session token for SignalR
-  getBackendConfig: () => ipcRenderer.invoke('get-backend-config'),
+  getBackendConfig: () => ipcRenderer.invoke("get-backend-config"),
 
   // Alerts: dispatch user acknowledgment/dismissal to .NET orchestrator
   sendAlertResponse: (alertId, accepted) =>
-    ipcRenderer.invoke('send-alert-response', { alertId, accepted }),
+    ipcRenderer.invoke("send-alert-response", { alertId, accepted }),
 
   // Help Now: trigger manual quick-help request to .NET orchestrator
-  triggerHelpNow: () => ipcRenderer.invoke('trigger-help-now'),
-});
+  triggerHelpNow: () => ipcRenderer.invoke("trigger-help-now"),
 
+  // Diagnostic: Log explanation to terminal
+  logExplanation: (data) => ipcRenderer.send("log-explanation", data),
+
+  // 💬 Floating Side Overlay Chat Controls
+  openChatWindow: () => ipcRenderer.send("open-chat-window"),
+  closeChatWindow: () => ipcRenderer.send("close-chat-window"),
+  onNewExplanation: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on("new-explanation", listener);
+    return () => ipcRenderer.removeListener("new-explanation", listener);
+  },
+  sendChatMessage: (data) => ipcRenderer.invoke("send-chat-message", data),
+  requestScreenCapture: () => ipcRenderer.send("request-screen-capture"),
+  onRequestScreenCapture: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("request-screen-capture", listener);
+    return () => ipcRenderer.removeListener("request-screen-capture", listener);
+  },
+
+  // Capture lifecycle. The main process broadcasts { phase: "started" } to
+  // BOTH overlay renderers when a capture begins and { phase: "failed", error }
+  // on any failed outcome, so neither overlay is left "analyzing" or stale.
+  onCaptureState: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on("capture-state", listener);
+    return () => ipcRenderer.removeListener("capture-state", listener);
+  },
+
+  // Dashboard → main: about to grab a frame. Registers the request and hides
+  // the overlays; resolves once they are off screen.
+  captureBegin: (requestId) => ipcRenderer.invoke("capture-begin", requestId),
+
+  // Dashboard → main: frame grabbed, bring the overlays back.
+  captureEnd: () => ipcRenderer.send("capture-end"),
+
+  // Dashboard → overlays (via main): the capture failed.
+  reportCaptureFailure: (message) =>
+    ipcRenderer.send("capture-failed", message),
+
+  // Tutor replies: open an http(s) link in the system browser. The main
+  // process validates the URL; popups and navigation stay blocked.
+  openExternalLink: (url) => ipcRenderer.send("open-external-link", url),
+
+  // Floating widget: report the measured content size so the main process can
+  // resize the window to fit (no clipped buttons, no fixed pixel size in rules).
+  fitWidget: (width, height) =>
+    ipcRenderer.send("fit-widget", { width, height }),
+});
