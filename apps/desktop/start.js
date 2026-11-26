@@ -78,12 +78,36 @@ const npmCmd = isWindows ? "npm.cmd" : "npm";
 
 console.log("[SLC Desktop Runner] Starting Vite dev server...");
 
-// 1. Start Vite dev server
-const viteProcess = spawn(npmCmd, ["run", "dev"], {
+// On POSIX, `shell: true` means the spawned PID is a shell/npm wrapper, not the
+// real app. Starting each child as its own process-group leader (`detached`)
+// lets us signal the whole group (wrapper + Vite/Electron + backend) later.
+// On Windows we use `taskkill /T` instead, so `detached` is not needed.
+const spawnOptions = {
   cwd: __dirname,
   stdio: "inherit",
   shell: true,
-});
+  detached: !isWindows,
+};
+
+// Terminate a child AND all of its descendants.
+function killTree(child) {
+  if (!child || !child.pid || child.exitCode !== null) return;
+
+  try {
+    if (isWindows) {
+      // /T = kill the whole tree, /F = force
+      spawn("taskkill", ["/pid", child.pid.toString(), "/T", "/F"]);
+    } else {
+      // Negative PID = signal the entire process group created by `detached`
+      process.kill(-child.pid, "SIGTERM");
+    }
+  } catch {
+    /* already gone */
+  }
+}
+
+// 1. Start Vite dev server
+const viteProcess = spawn(npmCmd, ["run", "dev"], spawnOptions);
 
 let electronProcess = null;
 let isShuttingDown = false;
@@ -95,25 +119,8 @@ function cleanup() {
 
   console.log("\n[SLC Desktop Runner] Shutting down all processes...");
 
-  if (electronProcess && !electronProcess.killed) {
-    try {
-      electronProcess.kill();
-    } catch {
-      /* ignore */
-    }
-  }
-
-  if (viteProcess && !viteProcess.killed) {
-    try {
-      if (isWindows && viteProcess.pid) {
-        spawn("taskkill", ["/pid", viteProcess.pid.toString(), "/T", "/F"]);
-      } else {
-        viteProcess.kill("SIGTERM");
-      }
-    } catch {
-      /* ignore */
-    }
-  }
+  killTree(electronProcess);
+  killTree(viteProcess);
 
   setTimeout(() => process.exit(0), 300);
 }
@@ -161,11 +168,7 @@ waitForVite(() => {
   );
 
   // 3. Launch Electron (only once!)
-  electronProcess = spawn(npmCmd, ["run", "dev:electron"], {
-    cwd: __dirname,
-    stdio: "inherit",
-    shell: true,
-  });
+  electronProcess = spawn(npmCmd, ["run", "dev:electron"], spawnOptions);
 
   electronProcess.on("exit", (code) => {
     console.log(`[SLC Desktop Runner] Electron app closed (code: ${code}).`);

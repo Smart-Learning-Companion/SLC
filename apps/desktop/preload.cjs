@@ -64,6 +64,30 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener("request-screen-capture", listener);
   },
 
+  // Capture lifecycle. The main process broadcasts { phase: "started" } to
+  // BOTH overlay renderers when a capture begins and { phase: "failed", error }
+  // on any failed outcome, so neither overlay is left "analyzing" or stale.
+  onCaptureState: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on("capture-state", listener);
+    return () => ipcRenderer.removeListener("capture-state", listener);
+  },
+
+  // Dashboard → main: about to grab a frame. Registers the request and hides
+  // the overlays; resolves once they are off screen.
+  captureBegin: (requestId) => ipcRenderer.invoke("capture-begin", requestId),
+
+  // Dashboard → main: frame grabbed, bring the overlays back.
+  captureEnd: () => ipcRenderer.send("capture-end"),
+
+  // Dashboard → overlays (via main): the capture failed.
+  reportCaptureFailure: (message) =>
+    ipcRenderer.send("capture-failed", message),
+
+  // Tutor replies: open an http(s) link in the system browser. The main
+  // process validates the URL; popups and navigation stay blocked.
+  openExternalLink: (url) => ipcRenderer.send("open-external-link", url),
+
   // Floating widget: report the measured content size so the main process can
   // resize the window to fit (no clipped buttons, no fixed pixel size in rules).
   fitWidget: (width, height) =>

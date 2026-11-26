@@ -6,6 +6,7 @@ import {
   screen,
   ipcMain,
   safeStorage,
+  shell,
 } from "electron";
 import { fileURLToPath } from "url";
 import path from "path";
@@ -147,6 +148,122 @@ function preserveNativeTitle(window, title) {
     event.preventDefault();
     window.setTitle(title);
   });
+}
+
+const isAlive = (win) => !!win && !win.isDestroyed();
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Only our own windows may drive the IPC channels that have side effects.
+function isTrustedSender(event) {
+  return [mainWindow, floatingWidget, chatWindow].some(
+    (win) => isAlive(win) && win.webContents === event.sender,
+  );
+}
+
+// Frame captures and capture results are owned by the dashboard renderer.
+function isDashboardSender(event) {
+  return isAlive(mainWindow) && event.sender === mainWindow.webContents;
+}
+
+// ==========================================
+// SESSION EPOCH + EXPLANATION LEDGER
+// ==========================================
+// Explanations reach the app twice (SignalR event + HTTP response of
+// /context/frame?wait=true) and may also arrive after the session was stopped.
+// Every capture is registered here when it begins; log-explanation then
+// forwards each requestId to the overlays at most once, and never for a
+// request that started in an earlier session.
+const MAX_TRACKED_REQUESTS = 100;
+let sessionEpoch = 0; // +1 every time a session stops
+const requestLedger = new Map(); // requestId -> { epoch, delivered }
+
+function setCurrentSessionState(next) {
+  if (next === "idle" && currentSessionState !== "idle") {
+    // Session ended: every request issued before this point is now stale.
+    sessionEpoch += 1;
+  }
+  currentSessionState = next;
+}
+
+function registerCaptureRequest(requestId) {
+  if (typeof requestId !== "string" || !requestId) return;
+  // delete + set: re-arms the id if a backend ever reuses one, and keeps the
+  // Map in insertion order so the oldest entries are trimmed first.
+  requestLedger.delete(requestId);
+  requestLedger.set(requestId, { epoch: sessionEpoch, delivered: false });
+  while (requestLedger.size > MAX_TRACKED_REQUESTS) {
+    requestLedger.delete(requestLedger.keys().next().value);
+  }
+}
+
+function shouldDeliverExplanation(requestId) {
+  const entry =
+    typeof requestId === "string" ? requestLedger.get(requestId) : undefined;
+  if (!entry) return true; // not issued by a capture we saw: nothing to judge by
+  if (entry.epoch !== sessionEpoch) return false; // session stopped meanwhile
+  if (entry.delivered) return false; // other delivery path got here first
+  entry.delivered = true;
+  return true;
+}
+
+// ==========================================
+// CAPTURE LIFECYCLE: keep our overlays out of the frame
+// ==========================================
+// The overlays sit on top of the study material, so OCR would read the tutor
+// drawer instead of the lesson. The dashboard calls capture-begin before it
+// grabs a frame and capture-end right after.
+// Time to wait after hiding before the frame may be taken: the compositor and
+// the screen-capture stream need a few repaints to stop showing our windows.
+// Raise it if overlays still leak into captured frames.
+const OVERLAY_HIDE_SETTLE_MS = 250;
+// Safety net: if the dashboard never confirms the grab, restore anyway.
+const OVERLAY_RESTORE_TIMEOUT_MS = 8000;
+
+let overlayCaptureDepth = 0; // overlapping captures share one hide/restore
+let overlaysShownBeforeCapture = null; // { widget, chat }
+let overlayRestoreTimer = null;
+
+async function hideOverlaysForCapture() {
+  overlayCaptureDepth += 1;
+  if (overlayCaptureDepth === 1) {
+    overlaysShownBeforeCapture = {
+      widget: isAlive(floatingWidget) && floatingWidget.isVisible(),
+      chat: isAlive(chatWindow) && chatWindow.isVisible(),
+    };
+    if (isAlive(floatingWidget)) floatingWidget.hide();
+    if (isAlive(chatWindow)) chatWindow.hide();
+  }
+
+  clearTimeout(overlayRestoreTimer);
+  overlayRestoreTimer = setTimeout(
+    () => restoreOverlaysAfterCapture(true),
+    OVERLAY_RESTORE_TIMEOUT_MS,
+  );
+
+  const { widget, chat } = overlaysShownBeforeCapture;
+  if (widget || chat) await delay(OVERLAY_HIDE_SETTLE_MS);
+}
+
+function restoreOverlaysAfterCapture(force = false) {
+  if (overlayCaptureDepth === 0) return;
+  overlayCaptureDepth = force ? 0 : overlayCaptureDepth - 1;
+  if (overlayCaptureDepth > 0) return;
+
+  clearTimeout(overlayRestoreTimer);
+  overlayRestoreTimer = null;
+  const before = overlaysShownBeforeCapture;
+  overlaysShownBeforeCapture = null;
+  if (!before) return;
+
+  // showInactive: coming back must not steal focus from the study material.
+  if (before.chat && isAlive(chatWindow)) {
+    chatWindow.showInactive();
+    applyOverlayHints(chatWindow);
+  }
+  if (before.widget && isAlive(floatingWidget)) {
+    floatingWidget.showInactive();
+    applyOverlayHints(floatingWidget);
+  }
 }
 
 // ==========================================
@@ -609,7 +726,7 @@ ipcMain.on("session-state-changed", (_event, state) => {
     console.warn(`[Security] Disallowed session state received: ${state}`);
     return;
   }
-  currentSessionState = state;
+  setCurrentSessionState(state);
   const action =
     state === "monitoring" ? "start" : state === "paused" ? "pause" : "stop";
   notifyBackendSession(action);
@@ -622,10 +739,13 @@ ipcMain.on("trigger-session-action", (_event, action) => {
     return;
   }
 
-  if (action === "start") currentSessionState = "monitoring";
-  if (action === "pause") currentSessionState = "paused";
-  if (action === "resume") currentSessionState = "monitoring";
-  if (action === "stop") currentSessionState = "idle";
+  setCurrentSessionState(
+    action === "start" || action === "resume"
+      ? "monitoring"
+      : action === "pause"
+        ? "paused"
+        : "idle",
+  );
 
   notifyBackendSession(action);
 
@@ -722,6 +842,19 @@ ipcMain.handle("trigger-help-now", async () => {
 
 // Diagnostic: Print explanation to terminal & forward to floating widget
 ipcMain.on("log-explanation", (_event, data) => {
+  if (!data || typeof data !== "object") return;
+
+  // SignalR and the HTTP response both deliver the same explanation, and a
+  // reply can arrive after the session was stopped. Forward each requestId to
+  // the overlays once, so a late duplicate cannot wipe newer messages or
+  // reopen a drawer the user already dismissed.
+  if (!shouldDeliverExplanation(data.requestId)) {
+    console.log(
+      `[Electron Main] Dropped duplicate/stale explanation (requestId: ${data.requestId})`,
+    );
+    return;
+  }
+
   console.log(
     "\n==================== [AI TUTOR EXPLANATION] ====================",
   );
@@ -745,9 +878,78 @@ ipcMain.on("open-chat-window", openChatWindow);
 ipcMain.on("close-chat-window", closeChatWindow);
 
 ipcMain.on("request-screen-capture", () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send("request-screen-capture");
+  if (!isAlive(mainWindow)) {
+    sendOverlayMessage("capture-state", {
+      phase: "failed",
+      error: "The dashboard window is not available.",
+    });
+    return;
   }
+  // Tell BOTH overlay renderers first (mini bar and chat drawer are separate
+  // renderers), so neither keeps the previous screen context while the new
+  // capture runs. The dashboard grabs the frame and reports failures back.
+  sendOverlayMessage("capture-state", { phase: "started" });
+  mainWindow.webContents.send("request-screen-capture");
+});
+
+// Dashboard → main: about to grab a frame. Register the request, hide the
+// overlays and resolve once they are gone from the screen.
+ipcMain.handle("capture-begin", async (event, requestId) => {
+  if (!isDashboardSender(event)) return false;
+  registerCaptureRequest(requestId);
+  await hideOverlaysForCapture();
+  return true;
+});
+
+// Dashboard → main: the frame is in memory, bring the overlays back.
+ipcMain.on("capture-end", (event) => {
+  if (!isDashboardSender(event)) return;
+  restoreOverlaysAfterCapture();
+});
+
+// Dashboard → overlays: the capture failed (cancelled, no frame, backend
+// rejected it). Lets the overlays leave their "analyzing" state.
+ipcMain.on("capture-failed", (event, message) => {
+  if (!isDashboardSender(event)) return;
+  sendOverlayMessage("capture-state", {
+    phase: "failed",
+    error: typeof message === "string" ? message.slice(0, 300) : undefined,
+  });
+});
+
+// Links in tutor replies. Popups stay denied (setWindowOpenHandler) and
+// navigation stays locked to the app origin; this is the one narrow way out,
+// and it only accepts plain http(s) URLs from our own windows.
+const MAX_EXTERNAL_URL_LENGTH = 2048;
+ipcMain.on("open-external-link", (event, rawUrl) => {
+  if (!isTrustedSender(event)) {
+    console.warn("[Security] open-external-link from untrusted sender ignored");
+    return;
+  }
+  if (typeof rawUrl !== "string" || rawUrl.length > MAX_EXTERNAL_URL_LENGTH) {
+    return;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    console.warn("[Security] Ignored malformed external link");
+    return;
+  }
+  // Credentials in the URL (https://good.com@evil.com) are a phishing trick.
+  if (
+    (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+    parsed.username ||
+    parsed.password
+  ) {
+    console.warn(`[Security] Blocked external link: ${parsed.protocol}`);
+    return;
+  }
+
+  shell.openExternal(parsed.toString()).catch((err) => {
+    console.error("[Electron Main] Failed to open external link:", err);
+  });
 });
 
 ipcMain.handle(

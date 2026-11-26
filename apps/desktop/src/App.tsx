@@ -56,6 +56,16 @@ declare global {
       requestScreenCapture?: () => void;
       fitWidget?: (width: number, height: number) => void;
       onRequestScreenCapture?: (callback: () => void) => () => void;
+      onCaptureState?: (
+        callback: (event: {
+          phase: "started" | "failed";
+          error?: string;
+        }) => void,
+      ) => () => void;
+      captureBegin?: (requestId: string) => Promise<boolean>;
+      captureEnd?: () => void;
+      reportCaptureFailure?: (message: string) => void;
+      openExternalLink?: (url: string) => void;
     };
   }
 }
@@ -447,6 +457,30 @@ interface ChatMessage {
   timestamp: string;
 }
 
+const nowLabel = () =>
+  new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+function createInitialMessages(): ChatMessage[] {
+  return [
+    {
+      id: "init",
+      role: "tutor",
+      text: "ආයුබෝවන්! මම ඔබගේ AI Companion Tutor. Screen එකේ ඇති පාඩම හෝ කේතය පිළිබඳ ඕනෑම ගැටලුවක් මෙතනින් විමසන්න.",
+      timestamp: nowLabel(),
+    },
+  ];
+}
+
+// UI-only messages (greeting, spinner text, capture errors) are not part of
+// the conversation and are never sent to Gemini as history.
+function isTransientMessage(m: ChatMessage): boolean {
+  return (
+    m.id === "init" ||
+    m.id.startsWith("loading_") ||
+    m.id.startsWith("capfail_")
+  );
+}
+
 // ─── Markdown Parser & Renderer Setup ──────────────────────────────────────────
 function fallbackCopy(text: string): boolean {
   try {
@@ -477,6 +511,43 @@ function copyToClipboard(text: string): Promise<boolean> {
   return Promise.resolve(fallbackCopy(text));
 }
 
+// encodeURIComponent throws a URIError on an unpaired UTF-16 surrogate, which
+// model output or pasted text can contain. Replace those with U+FFFD first.
+function toWellFormed(text: string): string {
+  return text.replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    "\uFFFD",
+  );
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Open a link from a tutor reply. Only http(s) goes out; the main process
+// validates it again and hands it to the system browser.
+function openExternalUrl(href: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(href);
+  } catch {
+    return;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
+
+  if (window.electronAPI?.openExternalLink) {
+    window.electronAPI.openExternalLink(parsed.toString());
+  } else {
+    // Plain-browser dev (no Electron bridge)
+    window.open(parsed.toString(), "_blank", "noopener,noreferrer");
+  }
+}
+
 const markedParser = new Marked({
   gfm: true,
   breaks: true,
@@ -489,7 +560,7 @@ const markedParser = new Marked({
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;");
-      const encoded = encodeURIComponent(code);
+      const encoded = encodeURIComponent(toWellFormed(code));
       return `<div class="code-box">
         <div class="code-box-header">
           <span class="code-box-lang">${displayLang}</span>
@@ -567,10 +638,8 @@ function MarkdownMessage({ content, isUser }: MarkdownMessageProps) {
       });
     } catch (err) {
       console.error("[MarkdownMessage] Parse error:", err);
-      return body
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
+      // Never hand unsanitized text to dangerouslySetInnerHTML: show it as text.
+      return escapeHtml(body).replace(/\n/g, "<br />");
     }
   }, [body]);
 
@@ -584,7 +653,12 @@ function MarkdownMessage({ content, isUser }: MarkdownMessageProps) {
       e.stopPropagation();
       const encoded = copyBtn.getAttribute("data-code");
       if (encoded) {
-        const code = decodeURIComponent(encoded);
+        let code: string;
+        try {
+          code = decodeURIComponent(encoded);
+        } catch {
+          return; // malformed percent-encoding: nothing safe to copy
+        }
         copyToClipboard(code).then((success) => {
           if (success) {
             const label = copyBtn.querySelector(".copy-label");
@@ -603,12 +677,16 @@ function MarkdownMessage({ content, isUser }: MarkdownMessageProps) {
       return;
     }
 
-    // Handle external links safely
+    // Links: open http(s) targets in the system browser through the main
+    // process (popups are denied in the Electron windows, so window.open
+    // would silently do nothing). In-page anchors never leave the overlay.
     const link = target.closest<HTMLAnchorElement>("a");
-    if (link && link.href) {
+    if (link) {
       e.preventDefault();
       e.stopPropagation();
-      window.open(link.href, "_blank");
+      if (!(link.getAttribute("href") || "").startsWith("#")) {
+        openExternalUrl(link.href);
+      }
     }
   };
 
@@ -653,23 +731,22 @@ function FloatingWidget() {
   const [state, setState] = useState<SessionState>("idle");
   const isChatWindow =
     new URLSearchParams(window.location.search).get("mode") === "chat";
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "init",
-      role: "tutor",
-      text: "ආයුබෝවන්! මම ඔබගේ AI Companion Tutor. Screen එකේ ඇති පාඩම හෝ කේතය පිළිබඳ ඕනෑම ගැටලුවක් මෙතනින් විමසන්න.",
-      timestamp: new Date().toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-    },
-  ]);
+  const [messages, setMessages] =
+    useState<ChatMessage[]>(createInitialMessages);
   const [inputText, setInputText] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [screenContext, setScreenContext] = useState<string>("");
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const barRef = useRef<HTMLDivElement | null>(null);
+
+  // Refs mirror state that long-lived IPC callbacks need to read.
+  const stateRef = useRef<SessionState>("idle");
+  const isAnalyzingRef = useRef(false);
+  // Bumped whenever the tutor context is replaced or cleared (new capture, new
+  // explanation, session stop). A chat reply requested under an older
+  // generation was built from stale context and is discarded.
+  const contextGenRef = useRef(0);
 
   // Floating views need a transparent page with no scrollbars.
   useEffect(() => {
@@ -715,20 +792,90 @@ function FloatingWidget() {
     [isChatWindow],
   );
 
+  // Wipe everything that belongs to one study session (messages, screen
+  // context, pending flags) and invalidate in-flight chat requests.
+  const resetTutorSession = useCallback(() => {
+    contextGenRef.current += 1;
+    isAnalyzingRef.current = false;
+    setIsAnalyzing(false);
+    setIsTyping(false);
+    setInputText("");
+    setScreenContext("");
+    setMessages(createInitialMessages());
+  }, []);
+
+  // Single entry point for session-state changes (local clicks and syncs from
+  // the main process). Entering "idle" ends the session, so its tutor state is
+  // cleared; otherwise the next session would send the previous session's
+  // screen summary and conversation to Gemini.
+  const applySessionState = useCallback(
+    (next: SessionState) => {
+      const prev = stateRef.current;
+      stateRef.current = next;
+      setState(next);
+      if (next === "idle" && prev !== "idle") resetTutorSession();
+    },
+    [resetTutorSession],
+  );
+
+  // A capture started from ANY overlay: both renderers drop the previous
+  // screen context together and show the loading state.
+  const beginAnalyzing = useCallback(() => {
+    contextGenRef.current += 1;
+    isAnalyzingRef.current = true;
+    setIsAnalyzing(true);
+    setIsTyping(false);
+    setScreenContext("");
+    setMessages([
+      {
+        id: `loading_${Date.now()}`,
+        role: "tutor",
+        text: "Screen එක Capture කරමින් AI Tutor වෙතින් විස්තරය ලබාගනිමින් පවතී... කරුණාකර රැඳෙන්න...",
+        timestamp: nowLabel(),
+      },
+    ]);
+  }, []);
+
+  // Terminal failure of a capture (cancelled, no frame, backend rejected it):
+  // the input and capture button must not stay disabled.
+  const failAnalyzing = useCallback((error?: string) => {
+    if (!isAnalyzingRef.current) return; // nothing was waiting on a capture
+    isAnalyzingRef.current = false;
+    setIsAnalyzing(false);
+    setMessages([
+      {
+        id: `capfail_${Date.now()}`,
+        role: "tutor",
+        text: `Screen එක Capture කිරීමට නොහැකි වුණා${error ? `: ${error}` : ""}. කරුණාකර නැවත උත්සාහ කරන්න.`,
+        timestamp: nowLabel(),
+      },
+    ]);
+  }, []);
+
   useEffect(() => {
     window.electronAPI?.getCurrentSessionState?.().then((s) => {
-      if (s) setState(s as SessionState);
+      if (s) applySessionState(s as SessionState);
     });
 
     const unsubSync = window.electronAPI?.onSyncSessionState?.((newState) => {
-      setState(newState as SessionState);
+      applySessionState(newState as SessionState);
+    });
+
+    const unsubCapture = window.electronAPI?.onCaptureState?.((evt) => {
+      if (evt?.phase === "started") beginAnalyzing();
+      else if (evt?.phase === "failed") failAnalyzing(evt.error);
     });
 
     // When an explanation arrives from OCR + Gemini
     const unsubExp = window.electronAPI?.onNewExplanation?.((data) => {
       console.log("[FloatingWidget] Received new explanation:", data);
+      isAnalyzingRef.current = false;
       setIsAnalyzing(false);
       if (data?.text) {
+        // The screen context is replaced: chat replies still in flight were
+        // generated from the old one and must not land in the new conversation.
+        contextGenRef.current += 1;
+        setIsTyping(false);
         setScreenContext(data.text);
         // Fresh context: replaces previous screen explanation with this new capture
         setMessages([
@@ -736,10 +883,7 @@ function FloatingWidget() {
             id: `exp_${Date.now()}`,
             role: "tutor",
             text: `[Screen Analysis - ${data.language === "en" ? "English" : "සිංහල"}]\n\n${data.text}`,
-            timestamp: new Date().toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
+            timestamp: nowLabel(),
           },
         ]);
         toggleExpand(true);
@@ -748,29 +892,17 @@ function FloatingWidget() {
 
     return () => {
       unsubSync?.();
+      unsubCapture?.();
       unsubExp?.();
     };
-  }, [toggleExpand]);
+  }, [toggleExpand, applySessionState, beginAnalyzing, failAnalyzing]);
 
-  // Quick Help: Captures screen, clears previous screen context, and requests new explanation
+  // Quick Help: ask the main process to capture. It broadcasts "capture
+  // started" to BOTH overlay renderers (the mini bar and the chat drawer are
+  // separate windows) and the dashboard grabs the frame, so the drawer cannot
+  // keep stale messages while the new capture runs.
   const handleQuickHelp = () => {
-    if (state === "idle") {
-      return;
-    }
-
-    setIsAnalyzing(true);
-    setScreenContext("");
-    setMessages([
-      {
-        id: `loading_${Date.now()}`,
-        role: "tutor",
-        text: "Screen එක Capture කරමින් AI Tutor වෙතින් විස්තරය ලබාගනිමින් පවතී... කරුණාකර රැඳෙන්න...",
-        timestamp: new Date().toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      },
-    ]);
+    if (stateRef.current === "idle" || isAnalyzingRef.current) return;
 
     toggleExpand(true);
     window.electronAPI?.requestScreenCapture?.();
@@ -779,6 +911,8 @@ function FloatingWidget() {
   const handleSendMessage = async (textToSend?: string) => {
     const text = (textToSend || inputText).trim();
     if (!text || isTyping || isAnalyzing) return;
+    // Generation the answer will be valid for (see contextGenRef).
+    const gen = contextGenRef.current;
 
     const userMsg: ChatMessage = {
       id: `usr_${Date.now()}`,
@@ -796,7 +930,7 @@ function FloatingWidget() {
 
     try {
       const history = messages
-        .filter((m) => m.id !== "init" && !m.id.startsWith("loading_"))
+        .filter((m) => !isTransientMessage(m))
         .map((m) => ({
           role: m.role === "user" ? "user" : "model",
           text: m.text,
@@ -807,6 +941,11 @@ function FloatingWidget() {
         message: text,
         contextText: screenContext,
       });
+
+      // The screen context was replaced (new capture / new explanation) or the
+      // session was stopped while this request was in flight: its answer was
+      // generated from the old context and history, so drop it.
+      if (gen !== contextGenRef.current) return;
 
       if (res?.success && res.reply) {
         const replyText = res.reply;
@@ -837,6 +976,7 @@ function FloatingWidget() {
         ]);
       }
     } catch (err: unknown) {
+      if (gen !== contextGenRef.current) return;
       const msg = err instanceof Error ? err.message : String(err);
       setMessages((prev) => [
         ...prev,
@@ -851,14 +991,16 @@ function FloatingWidget() {
         },
       ]);
     } finally {
-      setIsTyping(false);
+      // Only the request that still owns the context may clear the spinner.
+      if (gen === contextGenRef.current) setIsTyping(false);
     }
   };
 
   const handleAction = (action: string) => {
-    if (action === "start" || action === "resume") setState("monitoring");
-    if (action === "pause") setState("paused");
-    if (action === "stop") setState("idle");
+    if (action === "start" || action === "resume")
+      applySessionState("monitoring");
+    if (action === "pause") applySessionState("paused");
+    if (action === "stop") applySessionState("idle");
     window.electronAPI?.triggerSessionAction?.(action);
   };
 
@@ -930,7 +1072,7 @@ function FloatingWidget() {
                 ? "Start a study session first to enable Quick Help"
                 : "Capture screen and generate explanation"
             }
-            disabled={state === "idle"}
+            disabled={state === "idle" || isAnalyzing}
             onClick={handleQuickHelp}
           >
             <HelpCircleIcon /> <span className="btn-text">Help</span>
@@ -1382,9 +1524,21 @@ function Dashboard() {
       setCapturing(true);
       setErrorMsg(null);
       const startTime = performance.now();
+      const reqId = overrideRequestId || `req_${Date.now()}`;
 
       let tempStream: MediaStream | null = null;
       let video = videoElementRef.current;
+
+      // A one-off share (diagnostic capture, paused-session help) is only
+      // needed until the JPEG exists. It is stopped right then, not after the
+      // OCR + Gemini round trip, because cleanupStream() (Pause/Stop) only
+      // knows about activeStreamRef and could not end it.
+      const releaseTempStream = () => {
+        if (tempStream) {
+          tempStream.getTracks().forEach((track) => track.stop());
+          tempStream = null;
+        }
+      };
 
       try {
         if (!video || !isStreamActive || video.readyState < 2) {
@@ -1422,19 +1576,31 @@ function Dashboard() {
         const ctx = canvas.getContext("2d");
         if (!ctx) throw new Error("2D context unavailable");
 
-        ctx.drawImage(video, 0, 0, width, height);
+        // The tutor overlays sit on top of the study material. Ask the main
+        // process to hide them (it resolves once they are off screen), grab
+        // the frame, then let it restore them. captureEnd runs on every path.
+        let blob: Blob | null = null;
+        try {
+          await window.electronAPI?.captureBegin?.(reqId);
+          ctx.drawImage(video, 0, 0, width, height);
+          blob = await new Promise<Blob | null>((resolve) => {
+            canvas.toBlob(resolve, "image/jpeg", 0.85);
+          });
+        } finally {
+          window.electronAPI?.captureEnd?.();
+        }
 
-        const blob = await new Promise<Blob | null>((resolve) => {
-          canvas.toBlob(resolve, "image/jpeg", 0.85);
-        });
+        // The frame is in memory: end the one-off screen share before the
+        // (slow) backend round trip below.
+        releaseTempStream();
 
         if (!blob) throw new Error("JPEG compression failed");
 
         const durationMs = Math.round(performance.now() - startTime);
-        const reqId = overrideRequestId || `req_${Date.now()}`;
 
         // Contract context.md: Dispatch raw JPEG bytes to backend orchestrator via IPC
         let backendDispatched = false;
+        let dispatchError: string | null = null;
         if (window.electronAPI?.sendFrameContext) {
           try {
             const buffer = await blob.arrayBuffer();
@@ -1444,8 +1610,15 @@ function Dashboard() {
               true,
             );
             backendDispatched = dispatchRes?.success ?? false;
+            if (!backendDispatched) {
+              dispatchError =
+                dispatchRes?.error ||
+                `Backend returned HTTP ${dispatchRes?.status ?? "error"}`;
+            }
 
-            // If explanation is returned directly via HTTP response
+            // If explanation is returned directly via HTTP response. SignalR
+            // delivers the same requestId too; the main process forwards the
+            // first one and drops the duplicate (or a stale one after Stop).
             if (dispatchRes?.data?.text) {
               const expData = dispatchRes.data;
               console.log("[Direct HTTP Explanation Result]", expData);
@@ -1457,7 +1630,16 @@ function Dashboard() {
               "[Capture Pipeline] Backend dispatch failed:",
               dispatchErr,
             );
+            dispatchError =
+              dispatchErr instanceof Error
+                ? dispatchErr.message
+                : String(dispatchErr);
           }
+        }
+
+        // Terminal failure: let the overlays leave their "analyzing" state.
+        if (dispatchError) {
+          window.electronAPI?.reportCaptureFailure?.(dispatchError);
         }
 
         if (lastCapture?.previewUrl) {
@@ -1477,10 +1659,9 @@ function Dashboard() {
         console.error("[Capture Error]", err);
         const message = err instanceof Error ? err.message : String(err);
         setErrorMsg(message);
+        window.electronAPI?.reportCaptureFailure?.(message);
       } finally {
-        if (tempStream) {
-          tempStream.getTracks().forEach((track) => track.stop());
-        }
+        releaseTempStream();
         setCapturing(false);
       }
     },
